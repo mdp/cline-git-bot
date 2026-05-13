@@ -66,7 +66,9 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       extraTools: [clarificationTool],
       checkpoint: { enabled: false },
     },
-    prompt: `Review the following diff:\n\n\`\`\`diff\n${diff}\n\`\`\``,
+    // System prompt ends with an open ```json fence; the model continues from there.
+    // Send the diff without any output-format instructions — those are in the system prompt.
+    prompt: `Review the following diff:\n\n${diff}`,
   };
 
   const sessionResult = await cline.start(input);
@@ -90,11 +92,25 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
 }
 
 function parseReviewOutput(text: string): ReviewResult {
-  // Try to parse a JSON block from the agent's output
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) ?? text.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
-  if (jsonMatch) {
+  // The system prompt ends with an open ```json fence, so the model's response
+  // may start directly with the JSON object (no opening fence). Try candidates
+  // in order of specificity.
+  const candidates: string[] = [];
+
+  // 1. Fenced block: ```json ... ```
+  const fenced = text.match(/```json\s*([\s\S]*?)```/);
+  if (fenced) candidates.push(fenced[1].trim());
+
+  // 2. Bare JSON object containing "verdict" anywhere in the text
+  const bare = text.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
+  if (bare) candidates.push(bare[0]);
+
+  // 3. The whole text (model continued directly from the open fence)
+  candidates.push(text.trim());
+
+  for (const candidate of candidates) {
     try {
-      const parsed = JSON.parse(jsonMatch[1] ?? jsonMatch[0]);
+      const parsed = JSON.parse(candidate);
       if (parsed.verdict && parsed.summary !== undefined) {
         return {
           status: "complete",
@@ -105,11 +121,11 @@ function parseReviewOutput(text: string): ReviewResult {
         };
       }
     } catch {
-      // fall through to text parsing
+      // try next candidate
     }
   }
 
-  // Heuristic verdict from text
+  // Heuristic fallback from plain text
   const lower = text.toLowerCase();
   let verdict: ReviewResult["verdict"] = "comment";
   if (lower.includes("approve") && !lower.includes("not approve") && !lower.includes("don't approve")) {
