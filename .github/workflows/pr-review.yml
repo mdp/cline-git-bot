@@ -110,9 +110,11 @@ jobs:
           node dist/index.js review "${ARGS[@]}" > review-result.json 2>review-error.log || true
 
           if [ ! -s review-result.json ]; then
-            ERROR=$(cat review-error.log | head -5)
+            ERROR=$(cat review-error.log | tail -20)
             echo '{"status":"failed","error":"'"${ERROR//\"/\'}"'"}' > review-result.json
           fi
+
+          echo "=== review-error.log ===" && cat review-error.log || true
 
       - name: Post review to PR
         uses: actions/github-script@v7

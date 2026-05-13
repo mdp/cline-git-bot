@@ -22,27 +22,26 @@ export interface ReviewOptions {
 export async function reviewCommand(opts: ReviewOptions): Promise<void> {
   const config = loadConfig(opts.model);
 
-  const { diff, workDir } = await resolveReviewInput({
-    repo: opts.repo,
-    branch: opts.branch,
-    pr: opts.pr,
-    diff: opts.diff,
-    baseBranch: opts.baseBranch,
-    cloneDepth: opts.cloneDepth,
-  });
-
-  let extraInstructions = "";
-  if (workDir) {
-    const reviewPromptPath = join(workDir, ".git-bot", "review.md");
-    if (existsSync(reviewPromptPath)) {
-      extraInstructions = readFileSync(reviewPromptPath, "utf-8");
-    }
-  }
-
-  const systemPrompt = buildReviewSystemPrompt({ focus: opts.focus, extraInstructions });
-
   let result;
   try {
+    const { diff, workDir } = await resolveReviewInput({
+      repo: opts.repo,
+      branch: opts.branch,
+      pr: opts.pr,
+      diff: opts.diff,
+      baseBranch: opts.baseBranch,
+      cloneDepth: opts.cloneDepth,
+    });
+
+    let extraInstructions = "";
+    if (workDir) {
+      const reviewPromptPath = join(workDir, ".git-bot", "review.md");
+      if (existsSync(reviewPromptPath)) {
+        extraInstructions = readFileSync(reviewPromptPath, "utf-8");
+      }
+    }
+
+    const systemPrompt = buildReviewSystemPrompt({ focus: opts.focus, extraInstructions });
     result = await runReviewer({ diff, systemPrompt, workDir, config, verbosity: opts.verbosity });
   } catch (err) {
     result = {
