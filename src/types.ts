@@ -43,19 +43,16 @@ export interface Config {
 }
 
 export function loadConfig(modelOverride?: string): Config {
-  const providerId = process.env.GIT_BOT_PROVIDER ?? "openrouter";
+  const providerId = process.env.GIT_BOT_PROVIDER || "openrouter";
   const apiKey =
-    process.env.GIT_BOT_API_KEY ??
-    process.env.OPENROUTER_API_KEY ??
+    process.env.GIT_BOT_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
     process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error(
       "No API key found. Set GIT_BOT_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
     );
   }
-  return {
-    providerId,
-    modelId: modelOverride ?? process.env.GIT_BOT_MODEL ?? "moonshotai/kimi-k2.6",
-    apiKey,
-  };
+  const modelId = modelOverride || process.env.GIT_BOT_MODEL || "moonshotai/kimi-k2.6";
+  return { providerId, modelId, apiKey };
 }

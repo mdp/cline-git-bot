@@ -17,58 +17,65 @@ export interface ReviewerOptions {
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
   const { diff, systemPrompt, workDir, config, verbosity } = opts;
 
-  const cline = await ClineCore.create({ clientName: "git-bot-review" });
+  const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
   const clarificationCapture: { questions: import("../types.js").Question[] | null } = { questions: null };
-  let sessionId = "";
+  let capturedSessionId = "";
 
   const clarificationTool = createClarificationTool(clarificationCapture, () => {
-    if (sessionId) cline.stop(sessionId).catch(() => {});
+    if (capturedSessionId) cline.stop(capturedSessionId).catch(() => {});
   });
 
   let completionText = "";
   let finishReason = "";
+
+  // Subscribe BEFORE cline.start() — startSession() internally awaits executeTurn(),
+  // so all events (including "ended") fire during the start() call. Subscribing after
+  // start() returns means we miss every event and the promise never resolves.
+  const sessionEnded = new Promise<void>((resolve) => {
+    const unsubscribe = cline.subscribe((event: CoreSessionEvent) => {
+      printProgress(event, verbosity);
+
+      if (event.type === "agent_event") {
+        const agentEvent = event.payload.event;
+        if (agentEvent.type === "done") {
+          completionText = agentEvent.text;
+          finishReason = agentEvent.reason;
+        }
+      }
+
+      if (event.type === "ended") {
+        unsubscribe();
+        resolve();
+      }
+    });
+    // No sessionId filter: we own this ClineCore instance and start exactly one session.
+  });
 
   const input: ClineCoreStartInput = {
     config: {
       ...config,
       systemPrompt,
       workspaceRoot: workDir ?? process.cwd(),
+      cwd: workDir ?? process.cwd(),
       mode: "plan",
       enableTools: true,
       enableSpawnAgent: false,
       enableAgentTeams: false,
       yolo: true,
       extraTools: [clarificationTool],
+      checkpoint: { enabled: false },
     },
-    prompt: `Review the following diff:\n\n\`\`\`diff\n${diff}\n\`\`\``,
+    // System prompt ends with an open ```json fence; the model continues from there.
+    // Send the diff without any output-format instructions — those are in the system prompt.
+    prompt: `Review the following diff:\n\n${diff}`,
   };
 
   const sessionResult = await cline.start(input);
-  sessionId = sessionResult.sessionId;
+  capturedSessionId = sessionResult.sessionId;
 
-  await new Promise<void>((resolve) => {
-    const unsubscribe = cline.subscribe(
-      (event: CoreSessionEvent) => {
-        printProgress(event, verbosity);
-
-        if (event.type === "agent_event") {
-          const agentEvent = event.payload.event;
-          if (agentEvent.type === "done") {
-            completionText = agentEvent.text;
-            finishReason = agentEvent.reason;
-          }
-        }
-
-        if (event.type === "ended") {
-          unsubscribe();
-          resolve();
-        }
-      },
-      { sessionId }
-    );
-  });
-
+  // sessionEnded is already resolved because all events fired during cline.start()
+  await sessionEnded;
   await cline.dispose();
 
   if (finishReason !== "completed") {
@@ -85,11 +92,25 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
 }
 
 function parseReviewOutput(text: string): ReviewResult {
-  // Try to parse a JSON block from the agent's output
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) ?? text.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
-  if (jsonMatch) {
+  // The system prompt ends with an open ```json fence, so the model's response
+  // may start directly with the JSON object (no opening fence). Try candidates
+  // in order of specificity.
+  const candidates: string[] = [];
+
+  // 1. Fenced block: ```json ... ```
+  const fenced = text.match(/```json\s*([\s\S]*?)```/);
+  if (fenced) candidates.push(fenced[1].trim());
+
+  // 2. Bare JSON object containing "verdict" anywhere in the text
+  const bare = text.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
+  if (bare) candidates.push(bare[0]);
+
+  // 3. The whole text (model continued directly from the open fence)
+  candidates.push(text.trim());
+
+  for (const candidate of candidates) {
     try {
-      const parsed = JSON.parse(jsonMatch[1] ?? jsonMatch[0]);
+      const parsed = JSON.parse(candidate);
       if (parsed.verdict && parsed.summary !== undefined) {
         return {
           status: "complete",
@@ -100,11 +121,11 @@ function parseReviewOutput(text: string): ReviewResult {
         };
       }
     } catch {
-      // fall through to text parsing
+      // try next candidate
     }
   }
 
-  // Heuristic verdict from text
+  // Heuristic fallback from plain text
   const lower = text.toLowerCase();
   let verdict: ReviewResult["verdict"] = "comment";
   if (lower.includes("approve") && !lower.includes("not approve") && !lower.includes("don't approve")) {
