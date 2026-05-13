@@ -17,7 +17,7 @@ export interface ReviewerOptions {
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
   const { diff, systemPrompt, workDir, config, verbosity } = opts;
 
-  const cline = await ClineCore.create({ clientName: "git-bot-review" });
+  const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
   const clarificationCapture: { questions: import("../types.js").Question[] | null } = { questions: null };
   let sessionId = "";
@@ -41,6 +41,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       enableAgentTeams: false,
       yolo: true,
       extraTools: [clarificationTool],
+      checkpoint: { enabled: false },
     },
     prompt: `Review the following diff:\n\n\`\`\`diff\n${diff}\n\`\`\``,
   };

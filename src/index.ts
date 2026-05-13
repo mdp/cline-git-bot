@@ -11,9 +11,32 @@ function verbosity(opts: { verbose?: boolean; quiet?: boolean }): Verbosity {
 }
 
 function handleError(err: unknown): never {
-  process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
+  const msg = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`Error: ${msg}\n`);
+  try {
+    process.stdout.write(JSON.stringify({ status: "failed", error: msg, verdict: "comment", summary: "", comments: [] }) + "\n");
+  } catch {}
   process.exit(1);
 }
+
+// Catch any unhandled rejections or exceptions so we always write a result to stdout
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  process.stderr.write(`UnhandledRejection: ${msg}\n`);
+  try {
+    process.stdout.write(JSON.stringify({ status: "failed", error: `UnhandledRejection: ${msg}`, verdict: "comment", summary: "", comments: [] }) + "\n");
+  } catch {}
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`UncaughtException: ${msg}\n`);
+  try {
+    process.stdout.write(JSON.stringify({ status: "failed", error: `UncaughtException: ${msg}`, verdict: "comment", summary: "", comments: [] }) + "\n");
+  } catch {}
+  process.exit(1);
+});
 
 const program = new Command()
   .name("git-bot")

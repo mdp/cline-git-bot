@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { resolveReviewInput } from "../core/review-input.js";
 import { runReviewer } from "../core/reviewer.js";
 import { buildReviewSystemPrompt } from "../core/prompts.js";
-import { printResult } from "../core/output.js";
 import type { Verbosity } from "../core/output.js";
 import { loadConfig } from "../types.js";
 
@@ -53,6 +52,9 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
     };
   }
 
-  printResult(result);
-  process.exit(result.status === "failed" ? 1 : 0);
+  // Write synchronously then exit to avoid buffered stdout being lost on process.exit()
+  const output = JSON.stringify(result) + "\n";
+  process.stdout.write(output, () => {
+    process.exit(result!.status === "failed" ? 1 : 0);
+  });
 }

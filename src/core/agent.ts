@@ -19,7 +19,7 @@ export async function runAgent(opts: AgentOptions): Promise<RunResult> {
   const { task, checkoutInfo, config, systemPrompt, verbosity } = opts;
   const { workDir, branch, initialCommit } = checkoutInfo;
 
-  const cline = await ClineCore.create({ clientName: "git-bot" });
+  const cline = await ClineCore.create({ clientName: "git-bot", backendMode: "local" });
 
   const clarificationCapture = { questions: null as RunResult["questions"] | null };
   let sessionId = "";
@@ -43,6 +43,7 @@ export async function runAgent(opts: AgentOptions): Promise<RunResult> {
       enableAgentTeams: false,
       yolo: true,
       extraTools: [clarificationTool],
+      checkpoint: { enabled: false },
     },
     prompt: task,
   };
