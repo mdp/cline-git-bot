@@ -1,0 +1,75 @@
+#!/usr/bin/env node
+import { Command } from "commander";
+import { runCommand } from "./commands/run.js";
+import { reviewCommand } from "./commands/review.js";
+import type { Verbosity } from "./core/output.js";
+
+function verbosity(opts: { verbose?: boolean; quiet?: boolean }): Verbosity {
+  if (opts.quiet) return "quiet";
+  if (opts.verbose) return "verbose";
+  return "normal";
+}
+
+function handleError(err: unknown): never {
+  process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
+}
+
+const program = new Command()
+  .name("git-bot")
+  .description("Autonomous software development agent")
+  .version("1.0.0");
+
+program
+  .command("run")
+  .description("Execute a development task in a git repository")
+  .requiredOption("--repo <url|path>", "Git repository URL or local path")
+  .option("--task <file|string>", "Task description (file path or inline string)")
+  .option("--context <file>", "Prior result JSON with answers filled in")
+  .option("--base-branch <branch>", "Branch to clone from (default: repo default)")
+  .option("--clone-depth <n>", "Git clone depth", (v) => parseInt(v, 10), 1)
+  .option("--model <id>", "AI model ID override")
+  .option("--keep", "Keep checkout directory on success")
+  .option("--verbose", "Stream full agent events to stderr")
+  .option("--quiet", "Suppress all stderr progress output")
+  .action(async (opts) => {
+    await runCommand({
+      repo: opts.repo,
+      task: opts.task,
+      context: opts.context,
+      baseBranch: opts.baseBranch,
+      cloneDepth: opts.cloneDepth,
+      model: opts.model,
+      keep: Boolean(opts.keep),
+      verbosity: verbosity(opts),
+    }).catch(handleError);
+  });
+
+program
+  .command("review")
+  .description("Review code changes in a git repository")
+  .option("--repo <url|path>", "Git repository URL or local path")
+  .option("--branch <name>", "Branch to review against base branch")
+  .option("--pr <number>", "Pull request number to review")
+  .option("--diff <file>", "Patch/diff file to review")
+  .option("--base-branch <branch>", "Base branch for diff comparison", "main")
+  .option("--focus <categories>", "Comma-separated focus areas (e.g. security,style)", (v) => v.split(",").map((s: string) => s.trim()), [])
+  .option("--clone-depth <n>", "Git clone depth", (v) => parseInt(v, 10), 1)
+  .option("--model <id>", "AI model ID override")
+  .option("--verbose", "Stream full agent events to stderr")
+  .option("--quiet", "Suppress all stderr progress output")
+  .action(async (opts) => {
+    await reviewCommand({
+      repo: opts.repo,
+      branch: opts.branch,
+      pr: opts.pr,
+      diff: opts.diff,
+      baseBranch: opts.baseBranch,
+      focus: opts.focus,
+      cloneDepth: opts.cloneDepth,
+      model: opts.model,
+      verbosity: verbosity(opts),
+    }).catch(handleError);
+  });
+
+program.parse();

@@ -1,0 +1,131 @@
+name: git-bot PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+  # Reusable entrypoint for other repos:
+  #   uses: your-org/git-bot/.github/workflows/pr-review.yml@main
+  workflow_call:
+    inputs:
+      blocking:
+        description: "If true, REQUEST_CHANGES verdict will block the PR"
+        type: string
+        default: "false"
+      model:
+        description: "AI model override (e.g. moonshotai/kimi-k2.6)"
+        type: string
+        default: ""
+      focus:
+        description: "Comma-separated review focus areas (e.g. security,style)"
+        type: string
+        default: ""
+      base-branch:
+        description: "Base branch for diff comparison"
+        type: string
+        default: "main"
+      node-version:
+        description: "Node.js version (must be >= 22)"
+        type: string
+        default: "22"
+      pr-number:
+        description: "PR number (required when called via workflow_call)"
+        type: string
+        default: ""
+      repo:
+        description: "Repository in owner/repo format (required when called via workflow_call)"
+        type: string
+        default: ""
+    secrets:
+      api-key:
+        description: "OpenRouter API key"
+        required: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_call' || !github.event.pull_request.draft }}
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      # When triggered via workflow_call, github.repository is the CALLER's repo.
+      # Parse git-bot's own repo from github.workflow_ref so we always build our source.
+      - name: Resolve git-bot source repo
+        id: gitbot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            echo "repo=$(echo '${{ github.workflow_ref }}' | sed 's|/\.github.*||')" >> $GITHUB_OUTPUT
+          else
+            echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout git-bot
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.gitbot.outputs.repo }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version || '22' }}
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run git-bot review
+        id: review
+        env:
+          GIT_BOT_API_KEY: ${{ secrets.api-key || secrets.OPENROUTER_API_KEY }}
+          GIT_BOT_MODEL: ${{ inputs.model || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ inputs.pr-number || github.event.pull_request.number }}"
+          REPO="${{ inputs.repo || github.repository }}"
+          REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          BASE_BRANCH="${{ inputs.base-branch || 'main' }}"
+          FOCUS="${{ inputs.focus || '' }}"
+
+          ARGS=(
+            "--pr" "$PR_NUMBER"
+            "--repo" "$REPO_URL"
+            "--base-branch" "$BASE_BRANCH"
+            "--quiet"
+          )
+          if [ -n "$FOCUS" ]; then
+            ARGS+=("--focus" "$FOCUS")
+          fi
+          if [ -n "$GIT_BOT_MODEL" ]; then
+            ARGS+=("--model" "$GIT_BOT_MODEL")
+          fi
+
+          node dist/index.js review "${ARGS[@]}" > review-result.json 2>review-error.log || true
+
+          if [ ! -s review-result.json ]; then
+            ERROR=$(cat review-error.log | head -5)
+            echo '{"status":"failed","error":"'"${ERROR//\"/\'}"'"}' > review-result.json
+          fi
+
+      - name: Post review to PR
+        uses: actions/github-script@v7
+        env:
+          BLOCKING: ${{ inputs.blocking || 'false' }}
+          PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+          TARGET_REPO: ${{ inputs.repo || github.repository }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const scriptPath = path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/post-review.cjs');
+            require(scriptPath)({ github, context, core });
