@@ -22,14 +22,36 @@ export async function runAgent(opts: AgentOptions): Promise<RunResult> {
   const cline = await ClineCore.create({ clientName: "git-bot", backendMode: "local" });
 
   const clarificationCapture = { questions: null as RunResult["questions"] | null };
-  let sessionId = "";
+  let capturedSessionId = "";
 
   const clarificationTool = createClarificationTool(clarificationCapture, () => {
-    if (sessionId) cline.stop(sessionId).catch(() => {});
+    if (capturedSessionId) cline.stop(capturedSessionId).catch(() => {});
   });
 
   let completionText = "";
   let finishReason = "";
+
+  // Subscribe BEFORE cline.start() — startSession() internally awaits executeTurn(),
+  // so all events (including "ended") fire during the start() call.
+  const sessionEnded = new Promise<void>((resolve) => {
+    const unsubscribe = cline.subscribe((event: CoreSessionEvent) => {
+      printProgress(event, verbosity);
+
+      if (event.type === "agent_event") {
+        const agentEvent = event.payload.event;
+        if (agentEvent.type === "done") {
+          completionText = agentEvent.text;
+          finishReason = agentEvent.reason;
+        }
+      }
+
+      if (event.type === "ended") {
+        unsubscribe();
+        resolve();
+      }
+    });
+    // No sessionId filter: we own this ClineCore instance and start exactly one session.
+  });
 
   const input: ClineCoreStartInput = {
     config: {
@@ -49,30 +71,9 @@ export async function runAgent(opts: AgentOptions): Promise<RunResult> {
   };
 
   const sessionResult = await cline.start(input);
-  sessionId = sessionResult.sessionId;
+  capturedSessionId = sessionResult.sessionId;
 
-  await new Promise<void>((resolve) => {
-    const unsubscribe = cline.subscribe(
-      (event: CoreSessionEvent) => {
-        printProgress(event, verbosity);
-
-        if (event.type === "agent_event") {
-          const agentEvent = event.payload.event;
-          if (agentEvent.type === "done") {
-            completionText = agentEvent.text;
-            finishReason = agentEvent.reason;
-          }
-        }
-
-        if (event.type === "ended") {
-          unsubscribe();
-          resolve();
-        }
-      },
-      { sessionId }
-    );
-  });
-
+  await sessionEnded;
   await cline.dispose();
 
   if (clarificationCapture.questions) {

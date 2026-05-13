@@ -20,14 +20,37 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
   const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
   const clarificationCapture: { questions: import("../types.js").Question[] | null } = { questions: null };
-  let sessionId = "";
+  let capturedSessionId = "";
 
   const clarificationTool = createClarificationTool(clarificationCapture, () => {
-    if (sessionId) cline.stop(sessionId).catch(() => {});
+    if (capturedSessionId) cline.stop(capturedSessionId).catch(() => {});
   });
 
   let completionText = "";
   let finishReason = "";
+
+  // Subscribe BEFORE cline.start() — startSession() internally awaits executeTurn(),
+  // so all events (including "ended") fire during the start() call. Subscribing after
+  // start() returns means we miss every event and the promise never resolves.
+  const sessionEnded = new Promise<void>((resolve) => {
+    const unsubscribe = cline.subscribe((event: CoreSessionEvent) => {
+      printProgress(event, verbosity);
+
+      if (event.type === "agent_event") {
+        const agentEvent = event.payload.event;
+        if (agentEvent.type === "done") {
+          completionText = agentEvent.text;
+          finishReason = agentEvent.reason;
+        }
+      }
+
+      if (event.type === "ended") {
+        unsubscribe();
+        resolve();
+      }
+    });
+    // No sessionId filter: we own this ClineCore instance and start exactly one session.
+  });
 
   const input: ClineCoreStartInput = {
     config: {
@@ -47,30 +70,10 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
   };
 
   const sessionResult = await cline.start(input);
-  sessionId = sessionResult.sessionId;
+  capturedSessionId = sessionResult.sessionId;
 
-  await new Promise<void>((resolve) => {
-    const unsubscribe = cline.subscribe(
-      (event: CoreSessionEvent) => {
-        printProgress(event, verbosity);
-
-        if (event.type === "agent_event") {
-          const agentEvent = event.payload.event;
-          if (agentEvent.type === "done") {
-            completionText = agentEvent.text;
-            finishReason = agentEvent.reason;
-          }
-        }
-
-        if (event.type === "ended") {
-          unsubscribe();
-          resolve();
-        }
-      },
-      { sessionId }
-    );
-  });
-
+  // sessionEnded is already resolved because all events fired during cline.start()
+  await sessionEnded;
   await cline.dispose();
 
   if (finishReason !== "completed") {
