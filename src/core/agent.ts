@@ -36,6 +36,7 @@ export async function runAgent(opts: AgentOptions): Promise<RunResult> {
       ...config,
       systemPrompt,
       workspaceRoot: workDir,
+      cwd: workDir,
       mode: "act",
       enableTools: true,
       enableSpawnAgent: false,

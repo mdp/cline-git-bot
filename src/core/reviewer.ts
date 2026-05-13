@@ -34,6 +34,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       ...config,
       systemPrompt,
       workspaceRoot: workDir ?? process.cwd(),
+      cwd: workDir ?? process.cwd(),
       mode: "plan",
       enableTools: true,
       enableSpawnAgent: false,
