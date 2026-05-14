@@ -50,6 +50,7 @@ export function buildReviewPrompt(opts: {
   prMeta?: { title: string; body: string };
   focus: string[];
   extraInstructions: string;
+  diffStat?: string;
 }): string {
   const prTitle = opts.prMeta?.title ? `"${opts.prMeta.title}"` : "this PR";
   const prBody = opts.prMeta?.body ? `\n\nPR description:\n${opts.prMeta.body}` : "";
@@ -58,7 +59,11 @@ export function buildReviewPrompt(opts: {
     ? `\n\nProject-specific review notes:\n${opts.extraInstructions}`
     : "";
 
-  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
+  const diffPart = opts.diffStat
+    ? `\n\nChanged files (source files only — build artifacts excluded):\n\`\`\`\n${opts.diffStat}\n\`\`\`\n\nIMPORTANT: When running git diff, always specify explicit file paths (e.g. \`git diff ${opts.baseBranch}..${opts.prBranch} -- src/foo.ts src/bar.ts\`). Never run \`git diff\` without file paths — the repo contains minified webpack bundles that will overflow your context.`
+    : "";
+
+  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}${diffPart}
 
 Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
 }

@@ -79,7 +79,7 @@ export async function resolveReviewInput(opts: {
       keep: true,
     });
     execSync(`git fetch origin ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
-    execSync(`git checkout ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
+    execSync(`git checkout -b ${opts.branch} FETCH_HEAD`, { cwd: info.workDir, stdio: "pipe" });
     return { workDir: info.workDir, prBranch: opts.branch, baseBranch: opts.baseBranch };
   }
 

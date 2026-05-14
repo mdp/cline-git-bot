@@ -78,7 +78,7 @@ function runTurn(
     capturedText,
   }));
 
-  return Promise.race([turn, timeout]).finally(() => clearTimeout(timeoutId));
+  return Promise.race([turn, timeout]).finally(() => { clearTimeout(timeoutId); unsubscribe(); });
 }
 
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
@@ -113,7 +113,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
         reasoningEffort: "medium",
         maxIterations: 20,
         checkpoint: { enabled: false },
-        compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 180000 },
+        compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 262144 },
       } as Parameters<typeof cline.start>[0]["config"],
       prompt,
     } as ClineCoreStartInput);
