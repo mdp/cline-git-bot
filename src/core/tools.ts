@@ -1,5 +1,5 @@
 import { createTool } from "@clinebot/sdk";
-import type { Question } from "../types.js";
+import type { Question, ReviewResult } from "../types.js";
 
 export interface ClarificationCapture {
   questions: Question[] | null;
@@ -36,6 +36,65 @@ export function createClarificationTool(capture: ClarificationCapture, stopFn: (
       capture.questions = input.questions;
       setImmediate(stopFn);
       return "Clarification requested. The session will exit with your questions.";
+    },
+  });
+}
+
+export function createSubmitReviewTool(
+  capture: { result: Omit<ReviewResult, "status" | "error"> | null },
+  stopFn: () => void,
+) {
+  return createTool({
+    name: "submit_review",
+    description:
+      "Call this when you have completed your review. " +
+      "Provide your verdict, a 2-3 sentence summary, and any inline comments on specific lines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        verdict: {
+          type: "string",
+          enum: ["approve", "request_changes", "comment"],
+          description:
+            "approve = all changed code is correct and production-ready; " +
+            "request_changes = errors or security issues that must be fixed before merge; " +
+            "comment = suggestions, questions, or mixed findings",
+        },
+        summary: {
+          type: "string",
+          description:
+            "2-3 sentences: what the PR does, one key strength or concern, and your overall recommendation. No filler.",
+        },
+        comments: {
+          type: "array",
+          description: "Inline comments on specific lines of changed files",
+          items: {
+            type: "object",
+            properties: {
+              file: { type: "string", description: "File path relative to repo root" },
+              line: {
+                type: ["number", "null"],
+                description: "Line number in the new file, or null for file-level or cross-cutting comments",
+              },
+              severity: {
+                type: "string",
+                enum: ["error", "warning", "suggestion"],
+              },
+              message: {
+                type: "string",
+                description: "Concise explanation of the issue. State problems directly.",
+              },
+            },
+            required: ["file", "line", "severity", "message"],
+          },
+        },
+      },
+      required: ["verdict", "summary", "comments"],
+    },
+    execute: async (input: Omit<ReviewResult, "status" | "error">) => {
+      capture.result = input;
+      setImmediate(stopFn);
+      return "Review submitted. Session will exit.";
     },
   });
 }

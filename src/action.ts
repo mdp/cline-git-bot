@@ -36,7 +36,7 @@ async function run() {
 
     let result: ReviewResult;
     try {
-      const { diff, workDir } = await resolveReviewInput({
+      const { workDir, prBranch, baseBranch: resolvedBase, prMeta } = await resolveReviewInput({
         repo: repoUrl,
         pr: prNumberRaw,
         baseBranch,
@@ -44,15 +44,20 @@ async function run() {
       });
 
       let extraInstructions = "";
-      if (workDir) {
-        const reviewPromptPath = join(workDir, ".git-bot", "review.md");
-        if (existsSync(reviewPromptPath)) {
-          extraInstructions = readFileSync(reviewPromptPath, "utf-8");
-        }
+      const reviewPromptPath = join(workDir, ".git-bot", "review.md");
+      if (existsSync(reviewPromptPath)) {
+        extraInstructions = readFileSync(reviewPromptPath, "utf-8");
       }
 
-      const systemPrompt = buildReviewSystemPrompt({ focus, extraInstructions });
-      result = await runReviewer({ diff, systemPrompt, workDir, config, verbosity: "quiet" });
+      const systemPrompt = buildReviewSystemPrompt({
+        workDir,
+        prBranch,
+        baseBranch: resolvedBase,
+        prMeta,
+        focus,
+        extraInstructions,
+      });
+      result = await runReviewer({ workDir, systemPrompt, config, verbosity: "normal" });
     } catch (err) {
       result = {
         status: "failed",

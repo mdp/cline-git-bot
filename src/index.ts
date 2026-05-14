@@ -4,7 +4,8 @@ import { runCommand } from "./commands/run.js";
 import { reviewCommand } from "./commands/review.js";
 import type { Verbosity } from "./core/output.js";
 
-function verbosity(opts: { verbose?: boolean; quiet?: boolean }): Verbosity {
+function verbosity(opts: { verbose?: boolean; quiet?: boolean; debug?: boolean }): Verbosity {
+  if (opts.debug) return "debug";
   if (opts.quiet) return "quiet";
   if (opts.verbose) return "verbose";
   return "normal";
@@ -71,22 +72,21 @@ program
 program
   .command("review")
   .description("Review code changes in a git repository")
-  .option("--repo <url|path>", "Git repository URL or local path")
+  .requiredOption("--repo <url|path>", "Git repository URL or local path")
   .option("--branch <name>", "Branch to review against base branch")
   .option("--pr <number>", "Pull request number to review")
-  .option("--diff <file>", "Patch/diff file to review")
   .option("--base-branch <branch>", "Base branch for diff comparison", "main")
   .option("--focus <categories>", "Comma-separated focus areas (e.g. security,style)", (v) => v.split(",").map((s: string) => s.trim()), [])
   .option("--clone-depth <n>", "Git clone depth", (v) => parseInt(v, 10), 1)
   .option("--model <id>", "AI model ID override")
-  .option("--verbose", "Stream full agent events to stderr")
+  .option("--verbose", "Stream agent events to stderr")
+  .option("--debug", "Stream full event JSON to stderr for CI debugging")
   .option("--quiet", "Suppress all stderr progress output")
   .action(async (opts) => {
     await reviewCommand({
       repo: opts.repo,
       branch: opts.branch,
       pr: opts.pr,
-      diff: opts.diff,
       baseBranch: opts.baseBranch,
       focus: opts.focus,
       cloneDepth: opts.cloneDepth,

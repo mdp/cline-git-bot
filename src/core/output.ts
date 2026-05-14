@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { CoreSessionEvent } from "@clinebot/sdk";
 import type { RunResult, ReviewResult } from "../types.js";
 
-export type Verbosity = "quiet" | "normal" | "verbose";
+export type Verbosity = "quiet" | "normal" | "verbose" | "debug";
 
 export function printProgress(event: CoreSessionEvent, verbosity: Verbosity): void {
   if (verbosity === "quiet") return;
@@ -10,6 +10,10 @@ export function printProgress(event: CoreSessionEvent, verbosity: Verbosity): vo
   if (event.type === "agent_event") {
     const { event: agentEvent } = event.payload;
 
+    if (verbosity === "debug") {
+      process.stderr.write(JSON.stringify(event) + "\n");
+      return;
+    }
     if (verbosity === "verbose") {
       process.stderr.write(JSON.stringify(agentEvent) + "\n");
       return;
