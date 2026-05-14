@@ -31,7 +31,8 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
-// Phase 1: Use the real Cline system prompt so the model knows how to use tools properly.
+// Phase 1: Use the real Cline system prompt so the model knows how to use tools properly,
+// but override the default rules to be review-specific (no building, no editing, just read).
 export function buildReviewSystemPrompt(workDir: string): string {
   const os = platform();
   const platformName = os === "darwin" ? "macOS" : os === "win32" ? "Windows" : "Linux";
@@ -40,6 +41,14 @@ export function buildReviewSystemPrompt(workDir: string): string {
     mode: "plan",
     platform: platformName,
     workspaceRoot: workDir,
+    rules: `You are performing a CODE REVIEW — not implementing, not fixing, not verifying.
+
+STRICT RULES:
+- Read the diff and relevant source files. That is your only job.
+- Do NOT run builds, tests, linters, or any shell commands.
+- Do NOT modify any files.
+- Do NOT try to verify changes by executing code.
+- Once you have read enough to form a complete opinion, write your review and stop.`,
   });
 }
 
