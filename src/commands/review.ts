@@ -69,5 +69,5 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
   }
 
   process.stdout.write(JSON.stringify(result) + "\n");
-  process.exitCode = result.status === "failed" ? 1 : 0;
+  process.exit(result.status === "failed" ? 1 : 0);
 }
