@@ -28,6 +28,8 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
 
   let completionText = "";
   let finishReason = "";
+  let endedReason = "";
+  let agentError: string | null = null;
 
   // Subscribe BEFORE cline.start() — startSession() internally awaits executeTurn(),
   // so all events (including "ended") fire during the start() call. Subscribing after
@@ -41,10 +43,13 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
         if (agentEvent.type === "done") {
           completionText = agentEvent.text;
           finishReason = agentEvent.reason;
+        } else if (agentEvent.type === "error") {
+          agentError = agentEvent.error?.message ?? String(agentEvent.error);
         }
       }
 
       if (event.type === "ended") {
+        endedReason = event.payload.reason ?? "";
         unsubscribe();
         resolve();
       }
@@ -78,13 +83,20 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
   await sessionEnded;
   await cline.dispose();
 
-  if (finishReason !== "completed") {
+  // finishReason comes from the agent_event "done"; endedReason comes from the session
+  // "ended" event. On API/model errors the done event may not fire, so fall back to
+  // endedReason. Surface agentError when present for actionable diagnostics.
+  const effectiveReason = finishReason || endedReason;
+  if (effectiveReason !== "completed") {
+    const detail = agentError
+      ? `${effectiveReason || "unknown"}: ${agentError}`
+      : (effectiveReason || "unknown");
     return {
       status: "failed",
       verdict: "comment",
       summary: "",
       comments: [],
-      error: `Reviewer finished with reason: ${finishReason || "unknown"}`,
+      error: `Reviewer finished with reason: ${detail}`,
     };
   }
 

@@ -98,7 +98,6 @@ jobs:
             "--pr" "$PR_NUMBER"
             "--repo" "$REPO_URL"
             "--base-branch" "$BASE_BRANCH"
-            "--quiet"
           )
           if [ -n "$FOCUS" ]; then
             ARGS+=("--focus" "$FOCUS")
@@ -115,6 +114,7 @@ jobs:
           fi
 
           echo "=== review-error.log ===" && cat review-error.log || true
+          echo "=== review-result.json ===" && cat review-result.json || true
 
       - name: Post review to PR
         uses: actions/github-script@v7
