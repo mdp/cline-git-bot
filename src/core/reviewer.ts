@@ -62,8 +62,10 @@ function runTurn(
     }
   });
 
+  let timeoutId: ReturnType<typeof setTimeout>;
+
   const timeout = new Promise<TurnResult>((resolve) => {
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       unsubscribe();
       resolve({ endedReason: "timeout", finishReason, agentError: agentError ?? "Turn timed out", capturedText });
     }, TURN_TIMEOUT_MS);
@@ -76,7 +78,7 @@ function runTurn(
     capturedText,
   }));
 
-  return Promise.race([turn, timeout]);
+  return Promise.race([turn, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
