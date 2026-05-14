@@ -24,51 +24,9 @@
  *   was changed, not to be cited.
  * - Old hunk is omitted entirely when the hunk has no removals.
  */
-// Maximum line length before we consider a file generated/minified and skip it.
-const MINIFIED_LINE_THRESHOLD = 500;
-
-function splitFileBlocks(rawDiff: string): Array<{ header: string; body: string; path: string }> {
-  const blocks: Array<{ header: string; body: string; path: string }> = [];
-  const filePattern = /^diff --git a\/.+ b\/(.+)$/m;
-  const parts = rawDiff.split(/(?=^diff --git )/m);
-  for (const part of parts) {
-    if (!part.trim()) continue;
-    const match = part.match(filePattern);
-    blocks.push({ header: part, body: part, path: match ? match[1] : "" });
-  }
-  return blocks;
-}
-
-function isGeneratedBlock(body: string): boolean {
-  for (const line of body.split("\n")) {
-    if ((line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) &&
-        line.length > MINIFIED_LINE_THRESHOLD) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function transformDiff(rawDiff: string): string {
-  // Split into per-file blocks and drop generated/minified files before processing.
-  const blocks = splitFileBlocks(rawDiff);
-  const skipped: string[] = [];
-  const kept: string[] = [];
-  for (const block of blocks) {
-    if (isGeneratedBlock(block.body)) {
-      skipped.push(block.path);
-    } else {
-      kept.push(block.body);
-    }
-  }
-  const filteredDiff = kept.join("");
-
   const output: string[] = [];
-  if (skipped.length > 0) {
-    output.push(`[${skipped.length} generated/minified file(s) omitted from review: ${skipped.join(", ")}]`);
-  }
-
-  const lines = filteredDiff.split("\n");
+  const lines = rawDiff.split("\n");
   let i = 0;
 
   while (i < lines.length) {
