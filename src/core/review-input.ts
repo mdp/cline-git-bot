@@ -29,7 +29,7 @@ export async function resolveReviewInput(opts: {
     const info = await checkout({ repo: opts.repo, baseBranch: opts.baseBranch, cloneDepth: opts.cloneDepth, keep: true });
     execSync(`git fetch origin pull/${opts.pr}/head:pr-${opts.pr}`, { cwd: info.workDir, stdio: "pipe" });
     execSync(`git checkout pr-${opts.pr}`, { cwd: info.workDir, stdio: "pipe" });
-    const raw = execSync(`git diff ${opts.baseBranch}...pr-${opts.pr}`, { cwd: info.workDir }).toString();
+    const raw = execSync(`git diff ${opts.baseBranch}...pr-${opts.pr}`, { cwd: info.workDir, maxBuffer: 100 * 1024 * 1024 }).toString();
     return { diff: transformDiff(raw), workDir: info.workDir };
   }
 
@@ -37,7 +37,7 @@ export async function resolveReviewInput(opts: {
     const info = await checkout({ repo: opts.repo, baseBranch: opts.baseBranch, cloneDepth: opts.cloneDepth, keep: true });
     execSync(`git fetch origin ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
     execSync(`git checkout ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
-    const raw = execSync(`git diff ${opts.baseBranch}...${opts.branch}`, { cwd: info.workDir }).toString();
+    const raw = execSync(`git diff ${opts.baseBranch}...${opts.branch}`, { cwd: info.workDir, maxBuffer: 100 * 1024 * 1024 }).toString();
     return { diff: transformDiff(raw), workDir: info.workDir };
   }
 
