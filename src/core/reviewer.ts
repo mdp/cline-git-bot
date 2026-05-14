@@ -63,6 +63,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       enableSpawnAgent: false,
       enableAgentTeams: false,
       yolo: true,
+      maxIterations: 20,
       extraTools: [submitReviewTool],
       checkpoint: { enabled: false },
       compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 180000 },

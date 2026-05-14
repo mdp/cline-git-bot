@@ -107,14 +107,12 @@ jobs:
             ARGS+=("--model" "$GIT_BOT_MODEL")
           fi
 
-          node dist/index.js review "${ARGS[@]}" > review-result.json 2>review-error.log || true
+          node dist/index.js review "${ARGS[@]}" > review-result.json || true
 
           if [ ! -s review-result.json ]; then
-            ERROR=$(cat review-error.log | tail -20)
-            echo '{"status":"failed","error":"'"${ERROR//\"/\'}"'"}' > review-result.json
+            echo '{"status":"failed","error":"review produced no output"}' > review-result.json
           fi
 
-          echo "=== review-error.log ===" && cat review-error.log || true
           echo "=== review-result.json ===" && cat review-result.json || true
 
       - name: Post review to PR
