@@ -1,3 +1,6 @@
+import { buildClineSystemPrompt } from "@clinebot/shared";
+import { platform } from "node:os";
+
 export function buildRunSystemPrompt(opts: {
   workDir: string;
   repoContext: string;
@@ -28,9 +31,16 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
-// Phase 1: exploration system prompt — minimal, just satisfies the SDK requirement.
-export function buildReviewSystemPrompt(): string {
-  return "You are a code reviewer. Explore the repository and write your review.";
+// Phase 1: Use the real Cline system prompt so the model knows how to use tools properly.
+export function buildReviewSystemPrompt(workDir: string): string {
+  const os = platform();
+  const platformName = os === "darwin" ? "macOS" : os === "win32" ? "Windows" : "Linux";
+  return buildClineSystemPrompt({
+    ide: "git-bot",
+    mode: "plan",
+    platform: platformName,
+    workspaceRoot: workDir,
+  });
 }
 
 export function buildReviewPrompt(opts: {
