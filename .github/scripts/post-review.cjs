@@ -108,6 +108,7 @@ module.exports = async function postReview({ github, context, core }) {
 // ---------------------------------------------------------------------------
 
 async function dismissPreviousBotReviews(github, owner, repo, prNumber) {
+  // Dismiss formal PR reviews
   const { data: reviews } = await github.rest.pulls.listReviews({
     owner,
     repo,
@@ -115,13 +116,9 @@ async function dismissPreviousBotReviews(github, owner, repo, prNumber) {
     per_page: 100,
   });
 
-  const botReviews = reviews.filter(
-    (r) =>
-      r.user?.login === "github-actions[bot]" &&
-      r.state !== "DISMISSED"
-  );
-
-  for (const review of botReviews) {
+  for (const review of reviews.filter(
+    (r) => r.user?.login === "github-actions[bot]" && r.state !== "DISMISSED"
+  )) {
     try {
       await github.rest.pulls.dismissReview({
         owner,
@@ -131,7 +128,29 @@ async function dismissPreviousBotReviews(github, owner, repo, prNumber) {
         message: "Superseded by updated review",
       });
     } catch (err) {
-      // Non-fatal — old review stays but new one still gets posted
+      // Non-fatal
+    }
+  }
+
+  // Delete previous git-bot failure/review issue comments
+  const { data: comments } = await github.rest.issues.listComments({
+    owner,
+    repo,
+    issue_number: prNumber,
+    per_page: 100,
+  });
+
+  for (const comment of comments.filter(
+    (c) => c.user?.login === "github-actions[bot]" && c.body?.includes("git-bot")
+  )) {
+    try {
+      await github.rest.issues.deleteComment({
+        owner,
+        repo,
+        comment_id: comment.id,
+      });
+    } catch (err) {
+      // Non-fatal
     }
   }
 }
