@@ -9,12 +9,13 @@ import { createSubmitReviewTool } from "./tools.js";
 export interface ReviewerOptions {
   workDir: string;
   systemPrompt: string;
+  prompt: string;
   config: Config;
   verbosity: Verbosity;
 }
 
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
-  const { workDir, systemPrompt, config, verbosity } = opts;
+  const { workDir, systemPrompt, prompt, config, verbosity } = opts;
 
   const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
@@ -66,7 +67,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       checkpoint: { enabled: false },
       compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 180000 },
     },
-    prompt: "Review this PR. When you have a complete picture, call submit_review.",
+    prompt,
   };
 
   const sessionResult = await cline.start(input);

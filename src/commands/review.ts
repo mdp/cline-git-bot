@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveReviewInput } from "../core/review-input.js";
 import { runReviewer } from "../core/reviewer.js";
-import { buildReviewSystemPrompt } from "../core/prompts.js";
+import { buildReviewPrompt, buildReviewSystemPrompt } from "../core/prompts.js";
 import type { Verbosity } from "../core/output.js";
 import { loadConfig } from "../types.js";
 
@@ -36,7 +36,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
       extraInstructions = readFileSync(reviewPromptPath, "utf-8");
     }
 
-    const systemPrompt = buildReviewSystemPrompt({
+    const prompt = buildReviewPrompt({
       workDir,
       prBranch,
       baseBranch,
@@ -45,7 +45,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
       extraInstructions,
     });
 
-    result = await runReviewer({ workDir, systemPrompt, config, verbosity: opts.verbosity });
+    result = await runReviewer({ workDir, systemPrompt: buildReviewSystemPrompt({ workDir }), prompt, config, verbosity: opts.verbosity });
   } catch (err) {
     result = {
       status: "failed" as const,

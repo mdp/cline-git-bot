@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "./types.js";
 import { resolveReviewInput } from "./core/review-input.js";
 import { runReviewer } from "./core/reviewer.js";
-import { buildReviewSystemPrompt } from "./core/prompts.js";
+import { buildReviewPrompt, buildReviewSystemPrompt } from "./core/prompts.js";
 import type { ReviewResult, ReviewComment } from "./types.js";
 
 async function run() {
@@ -49,7 +49,7 @@ async function run() {
         extraInstructions = readFileSync(reviewPromptPath, "utf-8");
       }
 
-      const systemPrompt = buildReviewSystemPrompt({
+      const prompt = buildReviewPrompt({
         workDir,
         prBranch,
         baseBranch: resolvedBase,
@@ -57,7 +57,7 @@ async function run() {
         focus,
         extraInstructions,
       });
-      result = await runReviewer({ workDir, systemPrompt, config, verbosity: "normal" });
+      result = await runReviewer({ workDir, systemPrompt: buildReviewSystemPrompt({ workDir }), prompt, config, verbosity: "normal" });
     } catch (err) {
       result = {
         status: "failed",

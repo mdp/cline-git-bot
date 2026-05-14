@@ -28,7 +28,7 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
-export function buildReviewSystemPrompt(opts: {
+export function buildReviewPrompt(opts: {
   workDir: string;
   prBranch: string;
   baseBranch: string;
@@ -36,40 +36,20 @@ export function buildReviewSystemPrompt(opts: {
   focus: string[];
   extraInstructions: string;
 }): string {
-  const prSection = opts.prMeta
-    ? `## PR: ${opts.prMeta.title}\n${opts.prMeta.body ? `\n${opts.prMeta.body}\n` : ""}\n`
+  const prTitle = opts.prMeta?.title ? `"${opts.prMeta.title}"` : "this PR";
+  const prBody = opts.prMeta?.body ? `\n\nPR description:\n${opts.prMeta.body}` : "";
+  const focusPart = opts.focus.length ? ` Focus especially on: ${opts.focus.join(", ")}.` : "";
+  const extraPart = opts.extraInstructions
+    ? `\n\nProject-specific review rules:\n${opts.extraInstructions}`
     : "";
 
-  const focusSection = opts.focus.length
-    ? `Focus areas: ${opts.focus.join(", ")}\n\n`
-    : "";
+  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
-  const extraSection = opts.extraInstructions
-    ? `## Project-specific rules\n${opts.extraInstructions}\n\n`
-    : "";
+Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem scenario. Do not modify any files.${focusPart}${extraPart}
 
-  return `You are a senior code reviewer. You have full access to the repository and should explore it thoroughly before forming your verdict.
+When you have a complete picture, call \`submit_review\` with your verdict, summary, and inline comments. Use actual new-file line numbers for inline comments; set line to null for file-level or cross-cutting observations.`;
+}
 
-## Repository
-Working directory: ${opts.workDir}
-Branch under review: ${opts.prBranch}
-Base branch: ${opts.baseBranch}
-
-${prSection}## What to review
-${focusSection}Review for:
-- **Correctness** — logic errors, wrong conditions, off-by-one, unhandled edge cases
-- **Security** — injection, unvalidated input, exposed secrets, broken auth
-- **Test coverage** — are new behaviors covered? are existing tests broken?
-- **Clarity** — misleading names, non-obvious logic, dead code
-- **Style** — consistency with patterns in the surrounding code
-
-## Inline comment guidance
-Use actual new-file line numbers for inline comments. Set line to null for cross-cutting or file-level observations.
-
-Only flag something when you can state a concrete scenario where it causes a problem. Do not speculate. Do not flag missing imports or types that may exist elsewhere in the codebase.
-
-Use a direct tone. No filler ("Great job!", "Overall this looks good"). State problems directly.
-
-${extraSection}## Exit
-When you have a complete understanding of the changes, call \`submit_review\` with your verdict, summary, and comments. Do not modify any files.`;
+export function buildReviewSystemPrompt(opts: { workDir: string }): string {
+  return `You are a code reviewer with full access to a git repository at ${opts.workDir}. Run shell commands one at a time so you can see each result before deciding what to run next.`;
 }

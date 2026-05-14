@@ -55,6 +55,7 @@ export async function resolveReviewInput(opts: {
       cwd: info.workDir,
       stdio: "pipe",
     });
+    execSync(`git fetch --unshallow origin`, { cwd: info.workDir, stdio: "pipe" });
     execSync(`git checkout pr-${opts.pr}`, { cwd: info.workDir, stdio: "pipe" });
 
     const prBranch = `pr-${opts.pr}`;
