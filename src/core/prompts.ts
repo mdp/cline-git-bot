@@ -47,7 +47,7 @@ export function buildReviewPrompt(opts: {
 
 Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem scenario. Do not modify any files.${focusPart}${extraPart}
 
-When you have a complete picture, call \`submit_review\` with your verdict, summary, and inline comments. Use actual new-file line numbers for inline comments; set line to null for file-level or cross-cutting observations.`;
+You MUST finish by calling the \`submit_review\` tool — it is your only valid exit. Never respond with plain text at the end. After you have read the relevant files and diffs, call \`submit_review\` immediately with your verdict, summary, and inline comments. Use actual new-file line numbers; set line to null for file-level observations.`;
 }
 
 export function buildReviewSystemPrompt(opts: { workDir: string }): string {
