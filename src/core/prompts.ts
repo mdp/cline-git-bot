@@ -60,7 +60,9 @@ export function buildReviewPrompt(opts: {
 
   return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
-Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
+Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}
+
+IMPORTANT: Never search or read files inside the \`action/\` directory — it contains minified build artifacts and will produce useless results.${extraPart}`;
 }
 
 // Phase 2: extraction system prompt — overrides Cline defaults, one job only.
