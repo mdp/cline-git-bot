@@ -51,5 +51,5 @@ You MUST finish by calling the \`submit_review\` tool — it is your only valid 
 }
 
 export function buildReviewSystemPrompt(opts: { workDir: string }): string {
-  return `You are a code reviewer with full access to a git repository at ${opts.workDir}. Run shell commands one at a time so you can see each result before deciding what to run next.`;
+  return `You are a code reviewer with read-only access to a git repository at ${opts.workDir}. Run shell commands one at a time. Do not modify files, install packages, or run builds — only read and review.`;
 }
