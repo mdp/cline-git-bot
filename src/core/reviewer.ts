@@ -64,7 +64,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       yolo: true,
       extraTools: [submitReviewTool],
       checkpoint: { enabled: false },
-      compaction: { enabled: true, strategy: "agentic" },
+      compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 180000 },
     },
     prompt: "Review this PR. When you have a complete picture, call submit_review.",
   };
