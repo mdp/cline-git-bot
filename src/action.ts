@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "./types.js";
 import { resolveReviewInput } from "./core/review-input.js";
 import { runReviewer } from "./core/reviewer.js";
-import { buildReviewPrompt, buildReviewSystemPrompt } from "./core/prompts.js";
+import { buildReviewPrompt } from "./core/prompts.js";
 import type { ReviewResult, ReviewComment } from "./types.js";
 
 async function run() {
@@ -57,7 +57,7 @@ async function run() {
         focus,
         extraInstructions,
       });
-      result = await runReviewer({ workDir, systemPrompt: buildReviewSystemPrompt({ workDir }), prompt, config, verbosity: "normal" });
+      result = await runReviewer({ workDir, prompt, config, verbosity: "normal" });
     } catch (err) {
       result = {
         status: "failed",

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveReviewInput } from "../core/review-input.js";
 import { runReviewer } from "../core/reviewer.js";
-import { buildReviewPrompt, buildReviewSystemPrompt } from "../core/prompts.js";
+import { buildReviewPrompt } from "../core/prompts.js";
 import type { Verbosity } from "../core/output.js";
 import { loadConfig } from "../types.js";
 
@@ -45,7 +45,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
       extraInstructions,
     });
 
-    result = await runReviewer({ workDir, systemPrompt: buildReviewSystemPrompt({ workDir }), prompt, config, verbosity: opts.verbosity });
+    result = await runReviewer({ workDir, prompt, config, verbosity: opts.verbosity });
   } catch (err) {
     result = {
       status: "failed" as const,
@@ -56,8 +56,6 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
     };
   }
 
-  const output = JSON.stringify(result) + "\n";
-  process.stdout.write(output, () => {
-    process.exit(result!.status === "failed" ? 1 : 0);
-  });
+  process.stdout.write(JSON.stringify(result) + "\n");
+  process.exitCode = result.status === "failed" ? 1 : 0;
 }

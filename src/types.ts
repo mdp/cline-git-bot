@@ -40,6 +40,7 @@ export interface Config {
   providerId: string;
   modelId: string;
   apiKey: string;
+  extractModelId: string;
 }
 
 export function loadConfig(modelOverride?: string): Config {
@@ -54,5 +55,6 @@ export function loadConfig(modelOverride?: string): Config {
     );
   }
   const modelId = modelOverride || process.env.GIT_BOT_MODEL || "moonshotai/kimi-k2.6";
-  return { providerId, modelId, apiKey };
+  const extractModelId = process.env.GIT_BOT_EXTRACT_MODEL || "openai/gpt-oss-120b:nitro";
+  return { providerId, modelId, apiKey, extractModelId };
 }

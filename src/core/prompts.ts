@@ -28,6 +28,11 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
+// Phase 1: exploration system prompt — minimal, just satisfies the SDK requirement.
+export function buildReviewSystemPrompt(): string {
+  return "You are a code reviewer. Explore the repository and write your review.";
+}
+
 export function buildReviewPrompt(opts: {
   workDir: string;
   prBranch: string;
@@ -40,16 +45,33 @@ export function buildReviewPrompt(opts: {
   const prBody = opts.prMeta?.body ? `\n\nPR description:\n${opts.prMeta.body}` : "";
   const focusPart = opts.focus.length ? ` Focus especially on: ${opts.focus.join(", ")}.` : "";
   const extraPart = opts.extraInstructions
-    ? `\n\nProject-specific review rules:\n${opts.extraInstructions}`
+    ? `\n\nProject-specific review notes:\n${opts.extraInstructions}`
     : "";
 
   return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
-Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem scenario. Do not modify any files.${focusPart}${extraPart}
-
-You MUST finish by calling the \`submit_review\` tool — it is your only valid exit. Never respond with plain text at the end. After you have read the relevant files and diffs, call \`submit_review\` immediately with your verdict, summary, and inline comments. Use actual new-file line numbers; set line to null for file-level observations.`;
+Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
 }
 
-export function buildReviewSystemPrompt(opts: { workDir: string }): string {
-  return `You are a code reviewer with read-only access to a git repository at ${opts.workDir}. Run shell commands one at a time. Do not modify files, install packages, or run builds — only read and review.`;
+// Phase 2: extraction system prompt — overrides Cline defaults, one job only.
+export function buildExtractionSystemPrompt(): string {
+  return "You are a structured data extractor. Your only valid action is to call the submit_review tool with the data extracted from the review text provided. Do not write any prose. Do not call any other tool.";
+}
+
+export function buildExtractionPrompt(reviewText: string): string {
+  return `Below is a code review written in prose. Convert it into a call to the \`submit_review\` tool.
+
+Extraction rules:
+- verdict: "approve" only if the review is clearly positive with no blocking issues. "request_changes" if there are bugs, security issues, or must-fix items. "comment" for everything else.
+- summary: 2-3 sentences — what the PR does, the key finding, and the overall recommendation. Use the reviewer's own words where possible.
+- comments: extract specific issues as inline comments. For each:
+  - file: the file path exactly as the reviewer stated it. If no specific file was mentioned, use the closest implied file.
+  - line: the exact line number ONLY when the reviewer states it explicitly (e.g. "line 42", "line 28"). For "around line X", "near line X", or general file-level observations — use null.
+  - severity: "error" for bugs, security issues, crashes, or anything described as must-fix. "warning" for correctness concerns or potential problems. "suggestion" for style, clarity, naming, or optional improvements.
+  - message: the reviewer's finding, stated concisely and directly.
+
+Call submit_review now with these fields extracted from the review below.
+
+---
+${reviewText}`;
 }
