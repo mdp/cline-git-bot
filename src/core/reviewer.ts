@@ -4,7 +4,6 @@ import type { CoreSessionEvent } from "@clinebot/sdk";
 import type { Config, ReviewResult } from "../types.js";
 import type { Verbosity } from "./output.js";
 import { printProgress } from "./output.js";
-import { createClarificationTool } from "./tools.js";
 
 export interface ReviewerOptions {
   diff: string;
@@ -19,13 +18,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
 
   const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
-  const clarificationCapture: { questions: import("../types.js").Question[] | null } = { questions: null };
   let capturedSessionId = "";
-
-  const clarificationTool = createClarificationTool(clarificationCapture, () => {
-    if (capturedSessionId) cline.stop(capturedSessionId).catch(() => {});
-  });
-
   let completionText = "";
   let finishReason = "";
   let endedReason = "";
@@ -64,11 +57,10 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
       workspaceRoot: workDir ?? process.cwd(),
       cwd: workDir ?? process.cwd(),
       mode: "plan",
-      enableTools: true,
+      enableTools: false,
       enableSpawnAgent: false,
       enableAgentTeams: false,
       yolo: true,
-      extraTools: [clarificationTool],
       checkpoint: { enabled: false },
     },
     // System prompt ends with an open ```json fence; the model continues from there.
