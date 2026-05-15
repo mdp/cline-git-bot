@@ -18,12 +18,17 @@ export interface ReviewComment {
   file: string;
   line: number | null;
   severity: "error" | "warning" | "suggestion";
+  title: string;
   message: string;
 }
 
 export interface ReviewResult {
   status: "complete" | "failed";
   verdict: "approve" | "request_changes" | "comment";
+  effort: 1 | 2 | 3 | 4 | 5;
+  security: boolean;
+  has_tests: boolean;
+  walkthrough: string;
   summary: string;
   comments: ReviewComment[];
   error: string | null;
@@ -40,6 +45,7 @@ export interface Config {
   providerId: string;
   modelId: string;
   apiKey: string;
+  extractModelId: string;
 }
 
 export function loadConfig(modelOverride?: string): Config {
@@ -53,6 +59,7 @@ export function loadConfig(modelOverride?: string): Config {
       "No API key found. Set GIT_BOT_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
     );
   }
-  const modelId = modelOverride || process.env.GIT_BOT_MODEL || "moonshotai/kimi-k2.6";
-  return { providerId, modelId, apiKey };
+  const modelId = modelOverride || process.env.GIT_BOT_MODEL || "openai/gpt-oss-120b:nitro";
+  const extractModelId = process.env.GIT_BOT_EXTRACT_MODEL || "openai/gpt-oss-120b:nitro";
+  return { providerId, modelId, apiKey, extractModelId };
 }

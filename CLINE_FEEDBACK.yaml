@@ -1,0 +1,255 @@
+project: git-bot
+sdk_version: "@clinebot/sdk@0.0.38"
+context: >
+  git-bot is a two-phase CLI/GitHub Actions code reviewer built on @clinebot/sdk.
+  Phase 1 uses a reasoning model (kimi-k2.6 via OpenRouter) to explore a PR and
+  write a prose review. Phase 2 uses a fast model (gpt-oss-120b) to extract the
+  prose into a structured submit_review tool call. backendMode: "local" throughout.
+
+issues:
+
+  - id: subscribe-before-start
+    severity: critical
+    title: Events fire during cline.start() — subscribe-before-start is mandatory but undocumented
+    description: >
+      cline.start() does not return until the agent session finishes. All events
+      (tool calls, text output, errors, "ended") fire while you are awaiting the
+      call. Subscribing after await cline.start() means you have already missed
+      everything, including the "ended" event. There is no warning, no error, and
+      no indication in the docs or types that this is the required pattern.
+    impact: >
+      We spent days on this. Every naive integration will get it wrong the first
+      time. Sessions appeared to hang or produce no output because the subscriber
+      was wired up too late.
+    repro: |
+      // WRONG — misses all events
+      const session = await cline.start({ ... });
+      cline.subscribe(handler);
+
+      // CORRECT — must subscribe before start
+      const ended = new Promise(resolve => {
+        const unsub = cline.subscribe(event => {
+          if (event.type === "ended") { unsub(); resolve(event); }
+        });
+      });
+      await cline.start({ ... });
+      await ended;
+    ask: >
+      Document this pattern prominently in the README and type signatures.
+      Consider returning an event emitter/async-iterable from cline.start()
+      so the subscribe-before-start requirement is structurally enforced.
+
+  - id: recoverable-false-no-ended
+    severity: critical
+    title: recoverable:false error never fires "ended" — process hangs indefinitely
+    description: >
+      When the agent hits a non-recoverable error, the SDK emits an agent_event
+      with type "error" and recoverable: false, then stops. The "ended" event
+      never fires and cline.start() never returns. The process hangs forever until
+      the OS or a CI timeout kills it.
+    impact: >
+      CI runs were stuck for 26+ minutes with no output. GitHub Actions account
+      was suspended twice due to runaway jobs caused by this hang.
+    repro: |
+      // After a recoverable:false error event, this never resolves:
+      await cline.start({ ... });
+      // ^ blocks forever; cline.start() does not return after run-failed
+    workaround: |
+      Race cline.start() against a Promise that resolves when recoverable:false
+      is seen in the subscriber, plus a top-level setTimeout safety net.
+    ask: >
+      Always emit "ended" after a non-recoverable error. The session is done —
+      the SDK should signal that unconditionally.
+
+  - id: error-serializes-to-empty-object
+    severity: high
+    title: Error objects in events serialize to {} — error messages are invisible
+    description: >
+      The "error" field in agent error events is an Error instance.
+      JSON.stringify(new Error("message")) produces {} because Error.message
+      is non-enumerable. Logging events as JSON — the natural thing to do —
+      shows "error":{} with no useful information.
+    repro: |
+      cline.subscribe(event => {
+        if (event.type === "agent_event") {
+          const e = event.payload.event;
+          if (e.type === "error") {
+            console.log(JSON.stringify(e)); // {"type":"error","error":{},"recoverable":false}
+            // e.error.message is there but invisible in JSON
+          }
+        }
+      });
+    ask: >
+      Either serialize Error objects with their message included (e.g. using a
+      replacer), or change the field type to string so callers don't have to
+      know to use instanceof Error to extract the message.
+
+  - id: custom-system-prompt-bypasses-tool-instructions
+    severity: high
+    title: Custom systemPrompt replaces the entire built-in prompt — tool behavior breaks silently
+    description: >
+      With providerId: "openrouter", passing any custom systemPrompt replaces
+      the full built-in Cline system prompt verbatim. The ~2800-char built-in
+      prompt contains critical instructions: how to use each tool, that the model
+      must keep calling tools until the task is done, to use absolute paths, not
+      to ask clarifying questions, and environment context (CWD, platform, date).
+      None of this reaches the model when you supply your own systemPrompt.
+    impact: >
+      Our one-sentence system prompt ("You are a code reviewer. Explore the
+      repository and write your review.") caused kimi-k2.6 to call tools
+      incorrectly, hit consecutive mistake limits, and fail non-recoverably at
+      iteration 9 — every single run. Switching to buildClineSystemPrompt() from
+      @clinebot/shared fixed the problem immediately.
+    ask: >
+      Either (a) merge the custom systemPrompt with the built-in one rather than
+      replacing it, or (b) emit a clear warning when a custom systemPrompt is
+      provided without the expected tool-instruction structure, or (c) make
+      buildClineSystemPrompt() a first-class export from @clinebot/sdk with
+      clear documentation that it must be used as the base.
+
+  - id: reasoning-effort-not-defaulted
+    severity: high
+    title: reasoningEffort has no SDK default but the CLI defaults to "medium"
+    description: >
+      The CLI (clite) applies --thinking medium by default for all sessions.
+      The SDK does not apply any default for reasoningEffort. For models with
+      the "reasoning" capability (e.g. kimi-k2.6, which has contextWindow:262144
+      and capabilities:["reasoning",...]), this produces meaningfully different
+      behavior between the CLI and SDK without any indication that a variable
+      differs.
+    impact: >
+      We spent significant time debugging "works in Cline CLI, fails in SDK"
+      while running the identical model, not realizing reasoningEffort was the
+      missing variable. Without it, kimi-k2.6 produced responses the SDK could
+      not handle cleanly at higher iteration counts.
+    ask: >
+      Either apply the CLI default (medium) in the SDK for models that report
+      the "reasoning" capability, or document clearly that reasoningEffort must
+      be set manually and that the CLI default does not carry over to SDK usage.
+
+  - id: yolo-flag-vs-yolo-prompt
+    severity: medium
+    title: yolo:true means auto-approve, not YOLO_CLINE_SYSTEM_PROMPT — same name, different concept
+    description: >
+      yolo:true in CoreSessionConfig enables auto-approval of all tools (no user
+      confirmation). It does NOT inject YOLO_CLINE_SYSTEM_PROMPT into the session.
+      That prompt — which tells the model it must call submit_and_exit to exit and
+      that responses without tool calls are not considered complete — is a separate
+      concept with no SDK-level equivalent.
+    impact: >
+      We configured yolo:true expecting yolo-mode agent behavior (keep going,
+      use submit_and_exit, no confirmations). We got the no-confirmations part
+      but not the behavioral instructions, leading to agents that stopped early
+      without calling the exit tool.
+    ask: >
+      Rename one of these concepts, or document clearly that yolo:true is solely
+      about tool auto-approval and has nothing to do with the YOLO system prompt.
+      Ideally expose a yoloSystemPrompt:true flag that injects the right prompt.
+
+  - id: send-after-ended-throws
+    severity: medium
+    title: cline.send() throws "session not found" after ended — no resume path
+    description: >
+      After the "ended" event fires, the session is terminated. Calling
+      cline.send(sessionId, message) to add a follow-up message (e.g. for
+      clarification flows) throws "session not found". There is no way to resume
+      a session — a new cline.start() call is required.
+    impact: >
+      We designed a clarification flow where the caller adds answers to questions
+      and re-invokes. Initially tried cline.send() for this, hit the error, and
+      had to redesign to use two independent cline.start() calls with context
+      passed in the prompt.
+    ask: >
+      Document that sessions are not resumable after "ended". If resume is
+      intentionally unsupported, make the error message say so clearly rather
+      than "session not found".
+
+  - id: extra-tools-with-enable-tools-false
+    severity: low
+    title: extraTools + enableTools:false interaction is undocumented
+    description: >
+      Setting enableTools:false disables all built-in tools. Setting extraTools
+      alongside it exposes only the custom tools. This is a useful pattern for
+      constrained extraction phases where the model should only be able to call
+      one specific tool. It works, but there is no documentation confirming it
+      works or explaining the interaction.
+    ask: >
+      Document the enableTools:false + extraTools pattern explicitly. It is a
+      natural way to build constrained single-tool phases.
+
+  - id: empty-system-prompt-crash
+    severity: medium
+    title: Empty or missing systemPrompt causes an opaque internal crash
+    description: >
+      Passing systemPrompt:"" or omitting it in certain configurations causes
+      the SDK to crash mid-run with "SessionRuntime.shutdown called while a run
+      is in progress". There is no validation at session-start time, no helpful
+      error message, and the stack trace does not point to the missing prompt.
+    ask: >
+      Validate systemPrompt at cline.start() time and throw a clear error
+      ("systemPrompt is required and must be non-empty") before the session
+      starts rather than crashing internally mid-run.
+
+  - id: model-context-window-opacity
+    severity: low
+    title: Unclear whether SDK fetches model context window in backendMode:"local"
+    description: >
+      The CLI clearly fetches model metadata from OpenRouter (we can observe
+      contextWindow:262144 for kimi-k2.6 in clite --json output). In
+      backendMode:"local" with manual config, it is not clear whether the SDK
+      performs the same fetch, or whether compaction.contextWindowTokens must be
+      set manually to the correct value for the model.
+    impact: >
+      We set contextWindowTokens:180000 not knowing the actual window is 262144.
+      This caused compaction to trigger unnecessarily early (or not at all,
+      depending on interpretation).
+    ask: >
+      Document whether the SDK fetches model metadata in local mode, and whether
+      compaction.contextWindowTokens is required or auto-detected. Expose the
+      resolved model info (including contextWindow) in a session start event so
+      callers can verify what the SDK is using.
+
+  - id: search-codebase-minified-files
+    severity: critical
+    title: search_codebase context lines from minified files cause non-recoverable API failures
+    description: >
+      The built-in search_codebase tool uses ripgrep with contextLines:2 by default.
+      When a search pattern matches inside a minified or bundled file (e.g. action/index.js
+      — a webpack bundle with lines millions of characters long), the 2-line context
+      ripgrep returns includes an enormous amount of minified code. This gets added to
+      the conversation as a tool result, inflating the token count of the next API call
+      to the point where the provider rejects it. The SDK receives a provider error and
+      emits recoverable:false, hanging the process (see issue recoverable-false-no-ended).
+    impact: >
+      CI runs reliably fail with a non-recoverable error whenever the model calls
+      search_codebase on a repo containing minified build artifacts. The pattern is
+      deterministic: the error fires on the iteration immediately after search_codebase
+      returns a match from a minified file. This is invisible to the caller — the error
+      field is {} (see issue error-serializes-to-empty-object) and there is no indication
+      that the tool output caused the failure.
+    repro: |
+      1. Have a repo with a minified bundle (e.g. webpack output, action/index.js)
+      2. Let the agent call search_codebase with any pattern that matches inside it
+      3. The next iteration will fail with recoverable:false
+    workaround: >
+      Instruct the model in the review prompt to never search in directories containing
+      build artifacts. This is fragile — the model may not always comply, and callers
+      must know which directories to exclude.
+    ask: >
+      The search_codebase tool should detect and skip files that are likely minified
+      (e.g. lines exceeding a threshold length, or files matching common bundle patterns
+      like *.min.js, action/index.js). At minimum, truncate tool result lines to a
+      reasonable length (e.g. 500 chars) before adding them to the conversation context.
+
+summary:
+  total_issues: 11
+  critical: 3
+  high: 3
+  medium: 3
+  low: 2
+  top_ask: >
+    The subscribe-before-start requirement and the recoverable:false hang are
+    the two issues that caused the most damage (lost days, suspended CI accounts).
+    Fix those first. The system prompt and reasoningEffort gaps are close behind —
+    they make the SDK behave differently from the CLI in ways that are very hard
+    to diagnose.

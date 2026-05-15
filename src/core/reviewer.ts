@@ -4,141 +4,186 @@ import type { CoreSessionEvent } from "@clinebot/sdk";
 import type { Config, ReviewResult } from "../types.js";
 import type { Verbosity } from "./output.js";
 import { printProgress } from "./output.js";
-import { createClarificationTool } from "./tools.js";
+import { createSubmitReviewTool } from "./tools.js";
+import { buildReviewSystemPrompt, buildExtractionSystemPrompt, buildExtractionPrompt } from "./prompts.js";
 
 export interface ReviewerOptions {
-  diff: string;
-  systemPrompt: string;
-  workDir: string | null;
+  workDir: string;
+  prompt: string;
   config: Config;
   verbosity: Verbosity;
 }
 
+interface TurnResult {
+  endedReason: string;
+  finishReason: string;
+  agentError: string | null;
+  capturedText: string;
+  capturedReasoning: string;
+}
+
+const TURN_TIMEOUT_MS = 12 * 60 * 1000;
+
+function runTurn(
+  cline: ClineCore,
+  verbosity: Verbosity,
+  action: () => Promise<void>,
+  stopFn?: () => void,
+): Promise<TurnResult> {
+  let finishReason = "";
+  let agentError: string | null = null;
+  let capturedText = "";
+  let capturedReasoning = "";
+  let endedResolve!: (reason: string) => void;
+
+  const ended = new Promise<string>((resolve) => { endedResolve = resolve; });
+
+  const unsubscribe = cline.subscribe((event: CoreSessionEvent) => {
+    printProgress(event, verbosity);
+    if (event.type === "agent_event") {
+      const e = event.payload.event as Record<string, unknown>;
+      const t = e.type as string;
+      if (t === "done") finishReason = e.reason as string;
+      if (t === "error") {
+        const err = e.error as Record<string, unknown> | Error | null;
+        agentError = err instanceof Error ? err.message : (err && typeof err === "object" && "message" in err ? String(err.message) : JSON.stringify(err));
+        if (e.recoverable === false) {
+          unsubscribe();
+          endedResolve("error");
+          stopFn?.();
+        }
+      }
+      if (t === "content_end" && e.contentType === "text" && typeof e.text === "string") {
+        capturedText += e.text as string;
+      }
+      if (t === "content_end" && e.contentType === "reasoning" && typeof e.reasoning === "string") {
+        capturedReasoning = e.reasoning as string;
+      }
+    }
+    if (event.type === "ended") {
+      unsubscribe();
+      endedResolve((event.payload as Record<string, unknown>).reason as string ?? "");
+    }
+  });
+
+  let timeoutId: ReturnType<typeof setTimeout>;
+
+  const timeout = new Promise<TurnResult>((resolve) => {
+    timeoutId = setTimeout(() => {
+      unsubscribe();
+      resolve({ endedReason: "timeout", finishReason, agentError: agentError ?? "Turn timed out", capturedText, capturedReasoning });
+    }, TURN_TIMEOUT_MS);
+  });
+
+  const turn = action().then(async () => ({
+    endedReason: await ended,
+    finishReason,
+    agentError,
+    capturedText,
+    capturedReasoning,
+  }));
+
+  return Promise.race([turn, timeout]).finally(() => { clearTimeout(timeoutId); unsubscribe(); });
+}
+
 export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> {
-  const { diff, systemPrompt, workDir, config, verbosity } = opts;
+  const { workDir, prompt, config, verbosity } = opts;
 
   const cline = await ClineCore.create({ clientName: "git-bot-review", backendMode: "local" });
 
-  const clarificationCapture: { questions: import("../types.js").Question[] | null } = { questions: null };
+  const reviewCapture: { result: Omit<ReviewResult, "status" | "error"> | null } = { result: null };
   let capturedSessionId = "";
 
-  const clarificationTool = createClarificationTool(clarificationCapture, () => {
+  const submitReviewTool = createSubmitReviewTool(reviewCapture, () => {
     if (capturedSessionId) cline.stop(capturedSessionId).catch(() => {});
   });
 
-  let completionText = "";
-  let finishReason = "";
-
-  // Subscribe BEFORE cline.start() — startSession() internally awaits executeTurn(),
-  // so all events (including "ended") fire during the start() call. Subscribing after
-  // start() returns means we miss every event and the promise never resolves.
-  const sessionEnded = new Promise<void>((resolve) => {
-    const unsubscribe = cline.subscribe((event: CoreSessionEvent) => {
-      printProgress(event, verbosity);
-
-      if (event.type === "agent_event") {
-        const agentEvent = event.payload.event;
-        if (agentEvent.type === "done") {
-          completionText = agentEvent.text;
-          finishReason = agentEvent.reason;
-        }
-      }
-
-      if (event.type === "ended") {
-        unsubscribe();
-        resolve();
-      }
-    });
-    // No sessionId filter: we own this ClineCore instance and start exactly one session.
+  // ── Phase 1: exploration ──────────────────────────────────────────────────
+  const phase1 = await runTurn(cline, verbosity, async () => {
+    const session = await cline.start({
+      config: {
+        providerId: config.providerId,
+        modelId: config.modelId,
+        apiKey: config.apiKey,
+        systemPrompt: buildReviewSystemPrompt(workDir),
+        workspaceRoot: workDir,
+        cwd: workDir,
+        mode: "plan",
+        enableTools: true,
+        enableSpawnAgent: false,
+        enableAgentTeams: false,
+        yolo: true,
+        reasoningEffort: "medium",
+        maxIterations: 25,
+        checkpoint: { enabled: false },
+        compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 262144 },
+      } as Parameters<typeof cline.start>[0]["config"],
+      prompt,
+    } as ClineCoreStartInput);
+    capturedSessionId = session.sessionId;
   });
 
-  const input: ClineCoreStartInput = {
-    config: {
-      ...config,
-      systemPrompt,
-      workspaceRoot: workDir ?? process.cwd(),
-      cwd: workDir ?? process.cwd(),
-      mode: "plan",
-      enableTools: true,
-      enableSpawnAgent: false,
-      enableAgentTeams: false,
-      yolo: true,
-      extraTools: [clarificationTool],
-      checkpoint: { enabled: false },
-    },
-    // System prompt ends with an open ```json fence; the model continues from there.
-    // Send the diff without any output-format instructions — those are in the system prompt.
-    prompt: `Review the following diff:\n\n${diff}`,
-  };
+  // Fall back to reasoning tokens if the model wrote its review there
+  const reviewText = phase1.capturedText.trim() || phase1.capturedReasoning.trim();
 
-  const sessionResult = await cline.start(input);
-  capturedSessionId = sessionResult.sessionId;
+  process.stderr.write(`[git-bot] phase1 done: endedReason=${phase1.endedReason} finishReason=${phase1.finishReason} error=${phase1.agentError} textLen=${phase1.capturedText.trim().length} reasoningLen=${phase1.capturedReasoning.trim().length}\n`);
 
-  // sessionEnded is already resolved because all events fired during cline.start()
-  await sessionEnded;
+  if (phase1.agentError || !reviewText) {
+    await cline.dispose();
+    const detail = phase1.agentError
+      ? `${phase1.finishReason || phase1.endedReason || "unknown"}: ${phase1.agentError}`
+      : "Agent completed without producing a review";
+    return { status: "failed", verdict: "comment", effort: 3, security: false, has_tests: false, walkthrough: "", summary: "", comments: [], error: detail };
+  }
+
+  // ── Phase 2: extraction ───────────────────────────────────────────────────
+  capturedSessionId = "";
+  process.stderr.write(`[git-bot] starting phase2 extraction (reviewText length: ${reviewText.length})\n`);
+
+  const phase2 = await runTurn(cline, verbosity, async () => {
+    const session = await cline.start({
+      config: {
+        providerId: config.providerId,
+        modelId: config.extractModelId,
+        apiKey: config.apiKey,
+        systemPrompt: buildExtractionSystemPrompt(),
+        workspaceRoot: workDir,
+        cwd: workDir,
+        mode: "act",
+        enableTools: false,
+        enableSpawnAgent: false,
+        enableAgentTeams: false,
+        yolo: true,
+        maxIterations: 2,
+        extraTools: [submitReviewTool],
+        checkpoint: { enabled: false },
+      } as Parameters<typeof cline.start>[0]["config"],
+      prompt: buildExtractionPrompt(reviewText),
+    } as ClineCoreStartInput);
+    capturedSessionId = session.sessionId;
+  });
+
+  process.stderr.write(`[git-bot] phase2 done: endedReason=${phase2.endedReason} finishReason=${phase2.finishReason} error=${phase2.agentError} captured=${reviewCapture.result !== null}\n`);
+
   await cline.dispose();
 
-  if (finishReason !== "completed") {
+  if (reviewCapture.result) {
     return {
-      status: "failed",
-      verdict: "comment",
-      summary: "",
-      comments: [],
-      error: `Reviewer finished with reason: ${finishReason || "unknown"}`,
+      status: "complete",
+      verdict: reviewCapture.result.verdict,
+      effort: reviewCapture.result.effort ?? 3,
+      security: reviewCapture.result.security ?? false,
+      has_tests: reviewCapture.result.has_tests ?? false,
+      walkthrough: reviewCapture.result.walkthrough ?? "",
+      summary: reviewCapture.result.summary,
+      comments: reviewCapture.result.comments ?? [],
+      error: null,
     };
   }
 
-  return parseReviewOutput(completionText);
-}
+  const detail = phase2.agentError
+    ? `${phase2.finishReason || phase2.endedReason || "unknown"}: ${phase2.agentError}`
+    : (phase2.finishReason || phase2.endedReason || "Extraction phase did not call submit_review");
 
-function parseReviewOutput(text: string): ReviewResult {
-  // The system prompt ends with an open ```json fence, so the model's response
-  // may start directly with the JSON object (no opening fence). Try candidates
-  // in order of specificity.
-  const candidates: string[] = [];
-
-  // 1. Fenced block: ```json ... ```
-  const fenced = text.match(/```json\s*([\s\S]*?)```/);
-  if (fenced) candidates.push(fenced[1].trim());
-
-  // 2. Bare JSON object containing "verdict" anywhere in the text
-  const bare = text.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
-  if (bare) candidates.push(bare[0]);
-
-  // 3. The whole text (model continued directly from the open fence)
-  candidates.push(text.trim());
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (parsed.verdict && parsed.summary !== undefined) {
-        return {
-          status: "complete",
-          verdict: parsed.verdict,
-          summary: parsed.summary,
-          comments: parsed.comments ?? [],
-          error: null,
-        };
-      }
-    } catch {
-      // try next candidate
-    }
-  }
-
-  // Heuristic fallback from plain text
-  const lower = text.toLowerCase();
-  let verdict: ReviewResult["verdict"] = "comment";
-  if (lower.includes("approve") && !lower.includes("not approve") && !lower.includes("don't approve")) {
-    verdict = "approve";
-  } else if (lower.includes("request changes") || lower.includes("changes required")) {
-    verdict = "request_changes";
-  }
-
-  return {
-    status: "complete",
-    verdict,
-    summary: text.slice(0, 500),
-    comments: [],
-    error: null,
-  };
+  return { status: "failed", verdict: "comment", effort: 3, security: false, has_tests: false, walkthrough: "", summary: "", comments: [], error: detail };
 }

@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { CoreSessionEvent } from "@clinebot/sdk";
 import type { RunResult, ReviewResult } from "../types.js";
 
-export type Verbosity = "quiet" | "normal" | "verbose";
+export type Verbosity = "quiet" | "normal" | "verbose" | "debug";
 
 export function printProgress(event: CoreSessionEvent, verbosity: Verbosity): void {
   if (verbosity === "quiet") return;
@@ -10,8 +10,19 @@ export function printProgress(event: CoreSessionEvent, verbosity: Verbosity): vo
   if (event.type === "agent_event") {
     const { event: agentEvent } = event.payload;
 
-    if (verbosity === "verbose") {
-      process.stderr.write(JSON.stringify(agentEvent) + "\n");
+    if (verbosity === "debug" || verbosity === "verbose") {
+      // Only log meaningful events, not token-by-token reasoning spam
+      const t = agentEvent.type;
+      if (t === "iteration_start" || t === "iteration_end" || t === "done" || t === "error" || t === "usage") {
+        process.stderr.write(JSON.stringify(agentEvent) + "\n");
+      } else if (t === "content_end" && (agentEvent as Record<string, unknown>)["contentType"] === "tool") {
+        const e = agentEvent as Record<string, unknown>;
+        const out = JSON.stringify(e["output"] ?? "");
+        process.stderr.write(`[tool:${e["toolName"]}] ${out.slice(0, 200)}\n`);
+      } else if (t === "content_end" && (agentEvent as Record<string, unknown>)["contentType"] === "reasoning") {
+        const e = agentEvent as Record<string, unknown>;
+        process.stderr.write(`[reasoning] ${String(e["reasoning"] ?? "").slice(0, 200)}\n`);
+      }
       return;
     }
 

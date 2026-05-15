@@ -20,8 +20,6 @@ module.exports = async function postReview({ github, context, core }) {
     return;
   }
 
-  // For workflow_call, github.repository is the caller's repo (correct).
-  // TARGET_REPO env var makes it explicit when needed.
   const targetRepo = process.env.TARGET_REPO || context.repo.owner + "/" + context.repo.repo;
   const [owner, repo] = targetRepo.split("/");
   const blocking = process.env.BLOCKING === "true";
@@ -66,7 +64,7 @@ module.exports = async function postReview({ github, context, core }) {
   }
 
   // --- Build review body ---
-  const body = buildReviewBody(result.summary, bodyOnlyComments);
+  const body = buildReviewBody(result, bodyOnlyComments);
 
   // --- Post review, with inline comment fallback ---
   let postedComments = inlineComments;
@@ -80,15 +78,15 @@ module.exports = async function postReview({ github, context, core }) {
       comments: inlineComments,
     });
   } catch (err) {
-    // Inline comments rejected (lines outside diff) — retry without them
     core.warning(`Inline comments failed (${err.message}), retrying without them`);
     postedComments = [];
-    const fallbackBody = buildReviewBody(result.summary, [
+    const fallbackBody = buildReviewBody(result, [
       ...bodyOnlyComments,
       ...inlineComments.map((c) => ({
         file: c.path,
         line: c.line,
         severity: "suggestion",
+        title: "",
         message: c.body,
       })),
     ]);
@@ -115,13 +113,9 @@ async function dismissPreviousBotReviews(github, owner, repo, prNumber) {
     per_page: 100,
   });
 
-  const botReviews = reviews.filter(
-    (r) =>
-      r.user?.login === "github-actions[bot]" &&
-      r.state !== "DISMISSED"
-  );
-
-  for (const review of botReviews) {
+  for (const review of reviews.filter(
+    (r) => r.user?.login === "github-actions[bot]" && r.state !== "DISMISSED"
+  )) {
     try {
       await github.rest.pulls.dismissReview({
         owner,
@@ -130,9 +124,26 @@ async function dismissPreviousBotReviews(github, owner, repo, prNumber) {
         review_id: review.id,
         message: "Superseded by updated review",
       });
-    } catch (err) {
-      // Non-fatal — old review stays but new one still gets posted
-    }
+    } catch (err) { /* non-fatal */ }
+  }
+
+  const { data: comments } = await github.rest.issues.listComments({
+    owner,
+    repo,
+    issue_number: prNumber,
+    per_page: 100,
+  });
+
+  for (const comment of comments.filter(
+    (c) => c.user?.login === "github-actions[bot]" && c.body?.includes("git-bot")
+  )) {
+    try {
+      await github.rest.issues.deleteComment({
+        owner,
+        repo,
+        comment_id: comment.id,
+      });
+    } catch (err) { /* non-fatal */ }
   }
 }
 
@@ -152,19 +163,43 @@ function verdictToEvent(verdict, blocking) {
   return "COMMENT";
 }
 
-function formatComment(comment) {
-  const icon = { error: "🔴", warning: "🟡", suggestion: "🔵" }[comment.severity] ?? "•";
-  return `${icon} **${comment.severity}**: ${comment.message}`;
+function effortBar(effort) {
+  const n = Math.max(1, Math.min(5, effort || 3));
+  return "🔵".repeat(n) + "⚪".repeat(5 - n);
 }
 
-function buildReviewBody(summary, bodyOnlyComments) {
-  const lines = ["**git-bot review**\n", summary];
+function formatComment(comment) {
+  const icon = { error: "🔴", warning: "🟡", suggestion: "🔵" }[comment.severity] ?? "•";
+  const title = comment.title ? ` **${comment.title}**` :  "";
+  return `${icon}${title}\n\n${comment.message}`;
+}
+
+function buildReviewBody(result, bodyOnlyComments) {
+  const lines = [];
+
+  lines.push("## 🤖 git-bot Review\n");
+
+  if (result.walkthrough) {
+    lines.push(`> ${result.walkthrough}\n`);
+  }
+
+  // Stats table
+  lines.push("| | |");
+  lines.push("|---|---|");
+  lines.push(`| ⏱️ **Review effort** | ${result.effort ?? 3}/5 ${effortBar(result.effort)} |`);
+  lines.push(`| 🔒 **Security** | ${result.security ? "⚠️ Concerns identified" : "No concerns"} |`);
+  lines.push(`| 🧪 **Tests** | ${result.has_tests ? "✅ Tests included" : "❌ No tests"} |`);
+  lines.push("");
+
+  lines.push(result.summary);
 
   if (bodyOnlyComments.length > 0) {
-    lines.push("\n---\n**Additional comments:**");
+    lines.push("\n---\n### ⚡ Key Issues\n");
     for (const c of bodyOnlyComments) {
+      const icon = { error: "🔴", warning: "🟡", suggestion: "🔵" }[c.severity] ?? "•";
       const loc = c.file + (c.line ? `:${c.line}` : "");
-      lines.push(`- ${formatComment(c)} (\`${loc}\`)`);
+      const title = c.title ? ` **${c.title}**` : "";
+      lines.push(`${icon}${title} — \`${loc}\`\n\n${c.message}\n`);
     }
   }
 

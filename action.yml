@@ -1,0 +1,40 @@
+name: git-bot PR Review
+description: AI-powered PR code review using Claude
+author: mdp
+
+inputs:
+  api-key:
+    description: Anthropic or OpenRouter API key
+    required: true
+  model:
+    description: AI model ID override
+    required: false
+    default: ""
+  focus:
+    description: Comma-separated review focus areas (e.g. security,style)
+    required: false
+    default: ""
+  base-branch:
+    description: Base branch for diff comparison
+    required: false
+    default: main
+  blocking:
+    description: Whether to request changes (true) or always comment (false)
+    required: false
+    default: "false"
+  pr-number:
+    description: PR number to review (auto-detected from event context if omitted)
+    required: false
+    default: ""
+  repo:
+    description: Repository in owner/repo format (auto-detected if omitted)
+    required: false
+    default: ""
+
+runs:
+  using: node20
+  main: action/index.js
+
+branding:
+  icon: eye
+  color: blue

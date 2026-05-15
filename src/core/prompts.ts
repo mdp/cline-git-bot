@@ -1,3 +1,6 @@
+import { buildClineSystemPrompt } from "@clinebot/shared";
+import { platform } from "node:os";
+
 export function buildRunSystemPrompt(opts: {
   workDir: string;
   repoContext: string;
@@ -28,86 +31,69 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
-export function buildReviewSystemPrompt(opts: {
+export function buildReviewSystemPrompt(workDir: string): string {
+  const os = platform();
+  const platformName = os === "darwin" ? "macOS" : os === "win32" ? "Windows" : "Linux";
+  return buildClineSystemPrompt({
+    ide: "git-bot",
+    mode: "plan",
+    platform: platformName,
+    workspaceRoot: workDir,
+  });
+}
+
+export function buildReviewPrompt(opts: {
+  workDir: string;
+  prBranch: string;
+  baseBranch: string;
+  prMeta?: { title: string; body: string };
   focus: string[];
   extraInstructions: string;
 }): string {
-  const focusSection = opts.focus.length
-    ? `Focus areas for this review: ${opts.focus.join(", ")}\n\n`
+  const prTitle = opts.prMeta?.title ? `"${opts.prMeta.title}"` : "this PR";
+  const prBody = opts.prMeta?.body ? `\n\nPR description:\n${opts.prMeta.body}` : "";
+  const focusPart = opts.focus.length ? ` Focus especially on: ${opts.focus.join(", ")}.` : "";
+  const extraPart = opts.extraInstructions
+    ? `\n\nProject-specific review notes:\n${opts.extraInstructions}`
     : "";
 
-  return `You are a code reviewer performing a thorough, high-signal PR review.
+  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
-## Diff format
-The diff uses a structured format with absolute line numbers:
+Note: run_commands does not accept a timeout parameter — omit it.
 
-  ## File: 'src/example.ts'
+Write a thorough prose review covering:
+- What the PR does (a one-sentence walkthrough)
+- Correctness and bugs
+- Security concerns — explicitly state whether any exist
+- Test coverage — does the PR include tests?
+- Style, clarity, and consistency
 
-  @@ -10,7 +12,8 @@ function foo()
-  __new hunk__
-  12  unchanged context line   ← space prefix = context, line number = new-file line
-  13 +newly added line         ← + prefix = added code; cite THIS number in comments
-  14  unchanged context line
-  __old hunk__                 ← only present when lines were removed
-   unchanged context line
-  -removed line                ← - prefix = deleted code (no line number to cite)
+Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
+}
 
-Focus only on lines starting with \`+\` in \`__new hunk__\` sections — those are the new code.
-Line numbers in the new hunk are the exact numbers to use in inline comments.
+export function buildExtractionSystemPrompt(): string {
+  return "You are a structured data extractor. Your only valid action is to call the submit_review tool with data extracted from the review text. Do not write prose. Do not call any other tool.";
+}
 
-## Partial codebase
-You are reviewing a diff, not the full codebase. Functions, imports, types, and variables
-referenced but not defined in this diff may exist in other files. Do not flag missing
-definitions, missing imports, or undefined symbols unless you can confirm from the diff
-context that they are genuinely absent.
+export function buildExtractionPrompt(reviewText: string): string {
+  return `Below is a code review written in prose. Convert it into a call to the \`submit_review\` tool.
 
-## What to review
-${focusSection}Review for:
-- **Correctness** — logic errors, wrong conditions, off-by-one, unhandled edge cases
-- **Security** — injection, unvalidated input, exposed secrets, broken auth
-- **Test coverage** — are new behaviors covered? are existing tests broken?
-- **Clarity** — misleading names, non-obvious logic that needs a comment, dead code
-- **Style** — consistency with the patterns visible in the surrounding unchanged code
+Extraction rules:
+- verdict: "approve" only if clearly positive with no blocking issues. "request_changes" for bugs, security issues, or must-fix items. "comment" for everything else.
+- effort: 1-5 scale. 1 = trivial (typo fix, single-line change). 2 = small (few files, clear change). 3 = moderate (multi-file, some complexity). 4 = complex (large diff, architectural changes). 5 = very complex (deep understanding required, risky changes).
+- security: true if the reviewer identified any security concerns, false otherwise.
+- has_tests: true if the PR includes new or updated tests, false if no tests were added.
+- walkthrough: one sentence describing what the PR does.
+- summary: 2-3 sentences — the key finding and overall recommendation.
+- comments: each specific issue as an inline comment:
+  - file: the file path exactly as stated. Use closest implied file if not explicit.
+  - line: exact line number ONLY when explicitly stated (e.g. "line 42"). Use null for general observations.
+  - severity: "error" for bugs/security/must-fix. "warning" for correctness concerns. "suggestion" for style/clarity/optional.
+  - title: 2-4 word header for this issue (e.g. "Missing null check", "Credential leak risk", "Unused import").
+  - message: the reviewer's finding, stated concisely and directly.
 
-## What NOT to flag
-Do not report any of the following — they generate noise without value:
-- Missing type annotations, docstrings, or inline comments
-- Unused variable warnings (the variable may be used outside this diff)
-- Missing import statements (imports may exist in other files)
-- Suggestions to add logging or error handling to code that is clearly internal
-- Stylistic preferences not directly contradicted by the code already present
-- Speculative breakage ("this *might* fail if...") unless you can point to the specific
-  code path in the diff that would trigger it
+Call submit_review now with these fields extracted from the review below.
 
-## Confidence rules
-- **Errors and security issues**: report even at moderate confidence; note uncertainty explicitly
-- **Warnings and suggestions**: only flag when you can state a concrete, specific scenario
-  where the code causes a problem — if you cannot, do not flag it
-
-## Tone
-Use a direct, matter-of-fact tone. Do not use filler phrases ("Great job!", "Thanks for",
-"Overall this looks good"). Do not use accusatory language. State problems directly.
-
-## Output schema
-
-  verdict:  "approve" | "request_changes" | "comment"
-            — "approve" only when all changed code is clearly correct and production-ready
-            — "request_changes" only for errors or security issues that must be fixed first
-            — "comment" for everything else (suggestions, questions, mixed findings)
-
-  summary:  string — 2-3 sentences: what the PR does, one key strength or concern,
-            and the overall recommendation. No filler.
-
-  comments: array of {
-    file:     string   — exact path from the diff header (e.g. "src/core/auth.ts")
-    line:     number | null — line number from the __new hunk__ numbering;
-                              null for whole-file or cross-cutting comments
-    severity: "error" | "warning" | "suggestion"
-    message:  string   — concise explanation of the issue. Do not repeat the line
-                         number. For errors, state the problem directly; do not hedge
-                         with "consider" or "you may want to".
-  }
-
-${opts.extraInstructions ? `## Project-specific rules\n${opts.extraInstructions}\n\n` : ""}Response (valid JSON, nothing else):
-\`\`\`json`;
+---
+${reviewText}`;
 }
