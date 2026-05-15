@@ -1,5 +1,19 @@
 import { execSync } from "node:child_process";
+import { writeFileSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { checkout } from "./checkout.js";
+
+// Prevent git diff from expanding minified build artifacts into the model context.
+// This writes to .gitattributes in the work dir only — never touches the real repo.
+function blockBuildArtifactDiffs(workDir: string): void {
+  const path = join(workDir, ".gitattributes");
+  const rules = "\n# git-bot: suppress diffs for minified build artifacts\naction/** -diff\n";
+  try {
+    appendFileSync(path, rules);
+  } catch {
+    writeFileSync(path, rules);
+  }
+}
 
 export interface ReviewInput {
   workDir: string;
@@ -56,6 +70,7 @@ export async function resolveReviewInput(opts: {
       stdio: "pipe",
     });
     execSync(`git checkout pr-${opts.pr}`, { cwd: info.workDir, stdio: "pipe" });
+    blockBuildArtifactDiffs(info.workDir);
 
     const prBranch = `pr-${opts.pr}`;
 
@@ -79,6 +94,7 @@ export async function resolveReviewInput(opts: {
     });
     execSync(`git fetch origin ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
     execSync(`git checkout -b ${opts.branch} FETCH_HEAD`, { cwd: info.workDir, stdio: "pipe" });
+    blockBuildArtifactDiffs(info.workDir);
     return { workDir: info.workDir, prBranch: opts.branch, baseBranch: opts.baseBranch };
   }
 

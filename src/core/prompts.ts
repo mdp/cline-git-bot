@@ -57,9 +57,7 @@ export function buildReviewPrompt(opts: {
     ? `\n\nProject-specific review notes:\n${opts.extraInstructions}`
     : "";
 
-  const diffPart = `\n\nIMPORTANT: The \`action/\` directory contains minified webpack bundles — never run git diff or search_codebase on files inside it. Always run \`git diff --stat\` first to discover changed files, then diff source files individually or in small groups.`;
-
-  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}${diffPart}
+  return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
 Write a thorough prose review covering:
 - What the PR does (a one-sentence walkthrough)
