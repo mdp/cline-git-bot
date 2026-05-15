@@ -59,6 +59,8 @@ export function buildReviewPrompt(opts: {
 
   return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}
 
+Note: run_commands does not accept a timeout parameter — omit it.
+
 Write a thorough prose review covering:
 - What the PR does (a one-sentence walkthrough)
 - Correctness and bugs
