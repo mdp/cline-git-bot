@@ -48,7 +48,7 @@ export function createSubmitReviewTool(
     name: "submit_review",
     description:
       "Call this when you have completed your review. " +
-      "Provide your verdict, a 2-3 sentence summary, and any inline comments on specific lines.",
+      "Provide structured findings including effort score, security flag, test coverage, and inline comments.",
     inputSchema: {
       type: "object",
       properties: {
@@ -60,36 +60,57 @@ export function createSubmitReviewTool(
             "request_changes = errors or security issues that must be fixed before merge; " +
             "comment = suggestions, questions, or mixed findings",
         },
+        effort: {
+          type: "number",
+          enum: [1, 2, 3, 4, 5],
+          description: "Effort to review: 1 = trivial change, 5 = very complex, requires deep understanding",
+        },
+        security: {
+          type: "boolean",
+          description: "true if the review uncovered any security concerns, false otherwise",
+        },
+        has_tests: {
+          type: "boolean",
+          description: "true if the PR includes new or updated tests, false if no tests",
+        },
+        walkthrough: {
+          type: "string",
+          description: "One sentence describing what this PR does, in plain English",
+        },
         summary: {
           type: "string",
           description:
-            "2-3 sentences: what the PR does, one key strength or concern, and your overall recommendation. No filler.",
+            "2-3 sentences: key strength or concern, and overall recommendation. No filler.",
         },
         comments: {
           type: "array",
-          description: "Inline comments on specific lines of changed files",
+          description: "Inline comments on specific issues in the changed files",
           items: {
             type: "object",
             properties: {
               file: { type: "string", description: "File path relative to repo root" },
               line: {
                 type: ["number", "null"],
-                description: "Line number in the new file, or null for file-level or cross-cutting comments",
+                description: "Line number in the new file, or null for file-level comments",
               },
               severity: {
                 type: "string",
                 enum: ["error", "warning", "suggestion"],
               },
+              title: {
+                type: "string",
+                description: "2-4 word issue header, e.g. 'Missing null check', 'Credential leak risk'",
+              },
               message: {
                 type: "string",
-                description: "Concise explanation of the issue. State problems directly.",
+                description: "Concise explanation of the issue. State the concrete problem directly.",
               },
             },
-            required: ["file", "line", "severity", "message"],
+            required: ["file", "line", "severity", "title", "message"],
           },
         },
       },
-      required: ["verdict", "summary", "comments"],
+      required: ["verdict", "effort", "security", "has_tests", "walkthrough", "summary", "comments"],
     },
     execute: async (input: Omit<ReviewResult, "status" | "error">) => {
       capture.result = input;

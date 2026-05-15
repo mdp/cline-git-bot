@@ -24,7 +24,6 @@ interface TurnResult {
 
 const TURN_TIMEOUT_MS = 12 * 60 * 1000;
 
-// Subscribe BEFORE the action — events fire during the action's await.
 function runTurn(
   cline: ClineCore,
   verbosity: Verbosity,
@@ -58,7 +57,7 @@ function runTurn(
         capturedText += e.text as string;
       }
       if (t === "content_end" && e.contentType === "reasoning" && typeof e.reasoning === "string") {
-        capturedReasoning = e.reasoning as string; // keep last reasoning block (the final review)
+        capturedReasoning = e.reasoning as string;
       }
     }
     if (event.type === "ended") {
@@ -100,8 +99,6 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
   });
 
   // ── Phase 1: exploration ──────────────────────────────────────────────────
-  // The agent reads files and diffs freely, then writes its review as prose.
-  // We capture the text output; no custom exit tool needed.
   const phase1 = await runTurn(cline, verbosity, async () => {
     const session = await cline.start({
       config: {
@@ -117,7 +114,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
         enableAgentTeams: false,
         yolo: true,
         reasoningEffort: "medium",
-        maxIterations: 20,
+        maxIterations: 25,
         checkpoint: { enabled: false },
         compaction: { enabled: true, strategy: "agentic", contextWindowTokens: 262144 },
       } as Parameters<typeof cline.start>[0]["config"],
@@ -126,8 +123,7 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
     capturedSessionId = session.sessionId;
   });
 
-  // kimi-k2.6 sometimes writes the review in reasoning tokens and emits only whitespace as text.
-  // Fall back to the last reasoning block when text is empty.
+  // Fall back to reasoning tokens if the model wrote its review there
   const reviewText = phase1.capturedText.trim() || phase1.capturedReasoning.trim();
 
   process.stderr.write(`[git-bot] phase1 done: endedReason=${phase1.endedReason} finishReason=${phase1.finishReason} error=${phase1.agentError} textLen=${phase1.capturedText.trim().length} reasoningLen=${phase1.capturedReasoning.trim().length}\n`);
@@ -137,12 +133,10 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
     const detail = phase1.agentError
       ? `${phase1.finishReason || phase1.endedReason || "unknown"}: ${phase1.agentError}`
       : "Agent completed without producing a review";
-    process.stderr.write(`[git-bot] phase1 failed: ${detail}\n`);
-    return { status: "failed", verdict: "comment", summary: "", comments: [], error: detail };
+    return { status: "failed", verdict: "comment", effort: 3, security: false, has_tests: false, walkthrough: "", summary: "", comments: [], error: detail };
   }
 
   // ── Phase 2: extraction ───────────────────────────────────────────────────
-  // Fast cheap model converts the prose review into a structured submit_review call.
   capturedSessionId = "";
   process.stderr.write(`[git-bot] starting phase2 extraction (reviewText length: ${reviewText.length})\n`);
 
@@ -177,6 +171,10 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
     return {
       status: "complete",
       verdict: reviewCapture.result.verdict,
+      effort: reviewCapture.result.effort ?? 3,
+      security: reviewCapture.result.security ?? false,
+      has_tests: reviewCapture.result.has_tests ?? false,
+      walkthrough: reviewCapture.result.walkthrough ?? "",
       summary: reviewCapture.result.summary,
       comments: reviewCapture.result.comments ?? [],
       error: null,
@@ -187,5 +185,5 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
     ? `${phase2.finishReason || phase2.endedReason || "unknown"}: ${phase2.agentError}`
     : (phase2.finishReason || phase2.endedReason || "Extraction phase did not call submit_review");
 
-  return { status: "failed", verdict: "comment", summary: "", comments: [], error: detail };
+  return { status: "failed", verdict: "comment", effort: 3, security: false, has_tests: false, walkthrough: "", summary: "", comments: [], error: detail };
 }

@@ -62,6 +62,10 @@ async function run() {
       result = {
         status: "failed",
         verdict: "comment",
+        effort: 3 as const,
+        security: false,
+        has_tests: false,
+        walkthrough: "",
         summary: "",
         comments: [],
         error: err instanceof Error ? err.message : String(err),
@@ -89,7 +93,7 @@ async function run() {
         body: formatComment(c),
       }));
     const bodyOnly = (result.comments ?? []).filter((c) => c.line == null);
-    const body = buildBody(result.summary, bodyOnly);
+    const body = buildBody(result, bodyOnly);
 
     try {
       await octokit.rest.pulls.createReview({
@@ -100,12 +104,13 @@ async function run() {
     } catch {
       // Lines outside diff — retry body-only
       core.warning("Inline comments rejected, retrying without them");
-      const fallbackBody = buildBody(result.summary, [
+      const fallbackBody = buildBody(result, [
         ...bodyOnly,
         ...inlineComments.map((c) => ({
           file: c.path,
           line: c.line,
           severity: "suggestion" as const,
+          title: "",
           message: c.body,
         })),
       ]);
@@ -150,20 +155,45 @@ function toReviewEvent(verdict: string, blocking: boolean) {
   return "COMMENT" as const;
 }
 
-function formatComment(c: ReviewComment) {
-  const icon = ({ error: "🔴", warning: "🟡", suggestion: "🔵" } as Record<string, string>)[c.severity] ?? "•";
-  return `${icon} **${c.severity}**: ${c.message}`;
+function effortBar(effort: number): string {
+  const n = Math.max(1, Math.min(5, effort || 3));
+  return "🔵".repeat(n) + "⚪".repeat(5 - n);
 }
 
-function buildBody(summary: string, comments: ReviewComment[]) {
-  const lines = ["**git-bot review**\n", summary];
-  if (comments.length > 0) {
-    lines.push("\n---\n**Additional comments:**");
-    for (const c of comments) {
+function formatComment(c: ReviewComment): string {
+  const icon = ({ error: "🔴", warning: "🟡", suggestion: "🔵" } as Record<string, string>)[c.severity] ?? "•";
+  const title = c.title ? ` **${c.title}**` : "";
+  return `${icon}${title}\n\n${c.message}`;
+}
+
+function buildBody(result: ReviewResult, bodyOnlyComments: ReviewComment[]): string {
+  const lines: string[] = [];
+
+  lines.push("## 🤖 git-bot Review\n");
+
+  if (result.walkthrough) {
+    lines.push(`> ${result.walkthrough}\n`);
+  }
+
+  lines.push("| | |");
+  lines.push("|---|---|");
+  lines.push(`| ⏱️ **Review effort** | ${result.effort ?? 3}/5 ${effortBar(result.effort ?? 3)} |`);
+  lines.push(`| 🔒 **Security** | ${result.security ? "⚠️ Concerns identified" : "No concerns"} |`);
+  lines.push(`| 🧪 **Tests** | ${result.has_tests ? "✅ Tests included" : "❌ No tests"} |`);
+  lines.push("");
+
+  lines.push(result.summary);
+
+  if (bodyOnlyComments.length > 0) {
+    lines.push("\n---\n### ⚡ Key Issues\n");
+    for (const c of bodyOnlyComments) {
+      const icon = ({ error: "🔴", warning: "🟡", suggestion: "🔵" } as Record<string, string>)[c.severity] ?? "•";
       const loc = c.file + (c.line ? `:${c.line}` : "");
-      lines.push(`- ${formatComment(c)} (\`${loc}\`)`);
+      const title = c.title ? ` **${c.title}**` : "";
+      lines.push(`${icon}${title} — \`${loc}\`\n\n${c.message}\n`);
     }
   }
+
   return lines.join("\n");
 }
 

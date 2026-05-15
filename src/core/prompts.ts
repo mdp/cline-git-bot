@@ -31,7 +31,6 @@ Never stop without calling one of these two tools.
 ${opts.repoContext}${opts.priorContext}`;
 }
 
-// Phase 1: Use the Cline plan-mode system prompt exactly as clite --plan does.
 export function buildReviewSystemPrompt(workDir: string): string {
   const os = platform();
   const platformName = os === "darwin" ? "macOS" : os === "win32" ? "Windows" : "Linux";
@@ -62,24 +61,35 @@ export function buildReviewPrompt(opts: {
 
   return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}${diffPart}
 
-Review for correctness, security, test coverage, clarity, and style consistency. Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
+Write a thorough prose review covering:
+- What the PR does (a one-sentence walkthrough)
+- Correctness and bugs
+- Security concerns — explicitly state whether any exist
+- Test coverage — does the PR include tests?
+- Style, clarity, and consistency
+
+Only flag issues where you can state a concrete problem. Do not modify any files.${focusPart}${extraPart}`;
 }
 
-// Phase 2: extraction system prompt — overrides Cline defaults, one job only.
 export function buildExtractionSystemPrompt(): string {
-  return "You are a structured data extractor. Your only valid action is to call the submit_review tool with the data extracted from the review text provided. Do not write any prose. Do not call any other tool.";
+  return "You are a structured data extractor. Your only valid action is to call the submit_review tool with data extracted from the review text. Do not write prose. Do not call any other tool.";
 }
 
 export function buildExtractionPrompt(reviewText: string): string {
   return `Below is a code review written in prose. Convert it into a call to the \`submit_review\` tool.
 
 Extraction rules:
-- verdict: "approve" only if the review is clearly positive with no blocking issues. "request_changes" if there are bugs, security issues, or must-fix items. "comment" for everything else.
-- summary: 2-3 sentences — what the PR does, the key finding, and the overall recommendation. Use the reviewer's own words where possible.
-- comments: extract specific issues as inline comments. For each:
-  - file: the file path exactly as the reviewer stated it. If no specific file was mentioned, use the closest implied file.
-  - line: the exact line number ONLY when the reviewer states it explicitly (e.g. "line 42", "line 28"). For "around line X", "near line X", or general file-level observations — use null.
-  - severity: "error" for bugs, security issues, crashes, or anything described as must-fix. "warning" for correctness concerns or potential problems. "suggestion" for style, clarity, naming, or optional improvements.
+- verdict: "approve" only if clearly positive with no blocking issues. "request_changes" for bugs, security issues, or must-fix items. "comment" for everything else.
+- effort: 1-5 scale. 1 = trivial (typo fix, single-line change). 2 = small (few files, clear change). 3 = moderate (multi-file, some complexity). 4 = complex (large diff, architectural changes). 5 = very complex (deep understanding required, risky changes).
+- security: true if the reviewer identified any security concerns, false otherwise.
+- has_tests: true if the PR includes new or updated tests, false if no tests were added.
+- walkthrough: one sentence describing what the PR does.
+- summary: 2-3 sentences — the key finding and overall recommendation.
+- comments: each specific issue as an inline comment:
+  - file: the file path exactly as stated. Use closest implied file if not explicit.
+  - line: exact line number ONLY when explicitly stated (e.g. "line 42"). Use null for general observations.
+  - severity: "error" for bugs/security/must-fix. "warning" for correctness concerns. "suggestion" for style/clarity/optional.
+  - title: 2-4 word header for this issue (e.g. "Missing null check", "Credential leak risk", "Unused import").
   - message: the reviewer's finding, stated concisely and directly.
 
 Call submit_review now with these fields extracted from the review below.
