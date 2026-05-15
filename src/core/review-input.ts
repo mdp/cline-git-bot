@@ -1,17 +1,35 @@
 import { execSync } from "node:child_process";
-import { writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout } from "./checkout.js";
 
-// Prevent git diff from expanding minified build artifacts into the model context.
-// This writes to .gitattributes in the work dir only — never touches the real repo.
-function blockBuildArtifactDiffs(workDir: string): void {
-  const path = join(workDir, ".gitattributes");
-  const rules = "\n# git-bot: suppress diffs for minified build artifacts\naction/** -diff\n";
+// Mark gitignored paths as -diff in .gitattributes so git never expands them
+// as text when the model runs git diff — prevents minified bundles from
+// flooding the context window. Writes only to the throwaway work dir.
+function blockIgnoredDiffs(workDir: string): void {
+  let patterns: string[] = [];
   try {
-    appendFileSync(path, rules);
+    const raw = readFileSync(join(workDir, ".gitignore"), "utf-8");
+    patterns = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"));
   } catch {
-    writeFileSync(path, rules);
+    return; // no .gitignore — nothing to do
+  }
+
+  if (patterns.length === 0) return;
+
+  const rules =
+    "\n# git-bot: treat gitignored paths as binary for diff\n" +
+    patterns.map((p) => `${p} -diff`).join("\n") +
+    "\n";
+
+  const attrPath = join(workDir, ".gitattributes");
+  try {
+    appendFileSync(attrPath, rules);
+  } catch {
+    writeFileSync(attrPath, rules);
   }
 }
 
@@ -70,7 +88,7 @@ export async function resolveReviewInput(opts: {
       stdio: "pipe",
     });
     execSync(`git checkout pr-${opts.pr}`, { cwd: info.workDir, stdio: "pipe" });
-    blockBuildArtifactDiffs(info.workDir);
+    blockIgnoredDiffs(info.workDir);
 
     const prBranch = `pr-${opts.pr}`;
 
@@ -94,7 +112,7 @@ export async function resolveReviewInput(opts: {
     });
     execSync(`git fetch origin ${opts.branch}`, { cwd: info.workDir, stdio: "pipe" });
     execSync(`git checkout -b ${opts.branch} FETCH_HEAD`, { cwd: info.workDir, stdio: "pipe" });
-    blockBuildArtifactDiffs(info.workDir);
+    blockIgnoredDiffs(info.workDir);
     return { workDir: info.workDir, prBranch: opts.branch, baseBranch: opts.baseBranch };
   }
 
