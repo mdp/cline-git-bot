@@ -19,6 +19,7 @@ interface TurnResult {
   finishReason: string;
   agentError: string | null;
   capturedText: string;
+  capturedReasoning: string;
 }
 
 const TURN_TIMEOUT_MS = 12 * 60 * 1000;
@@ -33,6 +34,7 @@ function runTurn(
   let finishReason = "";
   let agentError: string | null = null;
   let capturedText = "";
+  let capturedReasoning = "";
   let endedResolve!: (reason: string) => void;
 
   const ended = new Promise<string>((resolve) => { endedResolve = resolve; });
@@ -55,6 +57,9 @@ function runTurn(
       if (t === "content_end" && e.contentType === "text" && typeof e.text === "string") {
         capturedText += e.text as string;
       }
+      if (t === "content_end" && e.contentType === "reasoning" && typeof e.reasoning === "string") {
+        capturedReasoning = e.reasoning as string; // keep last reasoning block (the final review)
+      }
     }
     if (event.type === "ended") {
       unsubscribe();
@@ -67,7 +72,7 @@ function runTurn(
   const timeout = new Promise<TurnResult>((resolve) => {
     timeoutId = setTimeout(() => {
       unsubscribe();
-      resolve({ endedReason: "timeout", finishReason, agentError: agentError ?? "Turn timed out", capturedText });
+      resolve({ endedReason: "timeout", finishReason, agentError: agentError ?? "Turn timed out", capturedText, capturedReasoning });
     }, TURN_TIMEOUT_MS);
   });
 
@@ -76,6 +81,7 @@ function runTurn(
     finishReason,
     agentError,
     capturedText,
+    capturedReasoning,
   }));
 
   return Promise.race([turn, timeout]).finally(() => { clearTimeout(timeoutId); unsubscribe(); });
@@ -120,17 +126,25 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
     capturedSessionId = session.sessionId;
   });
 
-  if (phase1.agentError || !phase1.capturedText.trim()) {
+  // kimi-k2.6 sometimes writes the review in reasoning tokens and emits only whitespace as text.
+  // Fall back to the last reasoning block when text is empty.
+  const reviewText = phase1.capturedText.trim() || phase1.capturedReasoning.trim();
+
+  process.stderr.write(`[git-bot] phase1 done: endedReason=${phase1.endedReason} finishReason=${phase1.finishReason} error=${phase1.agentError} textLen=${phase1.capturedText.trim().length} reasoningLen=${phase1.capturedReasoning.trim().length}\n`);
+
+  if (phase1.agentError || !reviewText) {
     await cline.dispose();
     const detail = phase1.agentError
       ? `${phase1.finishReason || phase1.endedReason || "unknown"}: ${phase1.agentError}`
       : "Agent completed without producing a review";
+    process.stderr.write(`[git-bot] phase1 failed: ${detail}\n`);
     return { status: "failed", verdict: "comment", summary: "", comments: [], error: detail };
   }
 
   // ── Phase 2: extraction ───────────────────────────────────────────────────
   // Fast cheap model converts the prose review into a structured submit_review call.
   capturedSessionId = "";
+  process.stderr.write(`[git-bot] starting phase2 extraction (reviewText length: ${reviewText.length})\n`);
 
   const phase2 = await runTurn(cline, verbosity, async () => {
     const session = await cline.start({
@@ -150,10 +164,12 @@ export async function runReviewer(opts: ReviewerOptions): Promise<ReviewResult> 
         extraTools: [submitReviewTool],
         checkpoint: { enabled: false },
       } as Parameters<typeof cline.start>[0]["config"],
-      prompt: buildExtractionPrompt(phase1.capturedText),
+      prompt: buildExtractionPrompt(reviewText),
     } as ClineCoreStartInput);
     capturedSessionId = session.sessionId;
   });
+
+  process.stderr.write(`[git-bot] phase2 done: endedReason=${phase2.endedReason} finishReason=${phase2.finishReason} error=${phase2.agentError} captured=${reviewCapture.result !== null}\n`);
 
   await cline.dispose();
 

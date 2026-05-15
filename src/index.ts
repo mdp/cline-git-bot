@@ -20,6 +20,12 @@ function handleError(err: unknown): never {
   process.exit(1);
 }
 
+// Hard exit after 20 minutes — catches any case where cline.dispose() or SDK handles hang.
+setTimeout(() => {
+  process.stderr.write("[git-bot] HARD TIMEOUT: process exceeded 20 minutes, force exiting\n");
+  process.exit(2);
+}, 20 * 60 * 1000);
+
 // Catch any unhandled rejections or exceptions so we always write a result to stdout
 process.on("unhandledRejection", (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);

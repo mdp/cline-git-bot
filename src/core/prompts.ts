@@ -50,7 +50,6 @@ export function buildReviewPrompt(opts: {
   prMeta?: { title: string; body: string };
   focus: string[];
   extraInstructions: string;
-  diffStat?: string;
 }): string {
   const prTitle = opts.prMeta?.title ? `"${opts.prMeta.title}"` : "this PR";
   const prBody = opts.prMeta?.body ? `\n\nPR description:\n${opts.prMeta.body}` : "";
@@ -59,9 +58,7 @@ export function buildReviewPrompt(opts: {
     ? `\n\nProject-specific review notes:\n${opts.extraInstructions}`
     : "";
 
-  const diffPart = opts.diffStat
-    ? `\n\nChanged files (source files only — build artifacts excluded):\n\`\`\`\n${opts.diffStat}\n\`\`\`\n\nIMPORTANT: When running git diff, always specify explicit file paths (e.g. \`git diff ${opts.baseBranch}..${opts.prBranch} -- src/foo.ts src/bar.ts\`). Never run \`git diff\` without file paths — the repo contains minified webpack bundles that will overflow your context.`
-    : "";
+  const diffPart = `\n\nIMPORTANT: The \`action/\` directory contains minified webpack bundles — never run git diff or search_codebase on files inside it. Always run \`git diff --stat\` first to discover changed files, then diff source files individually or in small groups.`;
 
   return `Please review ${prTitle} — the changes in branch \`${opts.prBranch}\` compared to \`${opts.baseBranch}\`. The repo is checked out at: ${opts.workDir}.${prBody}${diffPart}
 

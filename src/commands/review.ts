@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveReviewInput } from "../core/review-input.js";
@@ -37,16 +36,6 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
       extraInstructions = readFileSync(reviewPromptPath, "utf-8");
     }
 
-    let diffStat: string | undefined;
-    try {
-      diffStat = execSync(
-        `git diff ${baseBranch}..${prBranch} --stat -- . ':!action' ':!dist' ':!*.min.js' ':!node_modules'`,
-        { cwd: workDir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-      ).trim();
-    } catch {
-      // non-fatal — model will discover files on its own
-    }
-
     const prompt = buildReviewPrompt({
       workDir,
       prBranch,
@@ -54,7 +43,6 @@ export async function reviewCommand(opts: ReviewOptions): Promise<void> {
       prMeta,
       focus: opts.focus,
       extraInstructions,
-      diffStat,
     });
 
     result = await runReviewer({ workDir, prompt, config, verbosity: opts.verbosity });
